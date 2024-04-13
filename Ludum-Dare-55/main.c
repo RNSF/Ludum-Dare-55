@@ -63,6 +63,7 @@ void freeIntArray(IntArray * a) {
 // C Consts
 //------------------------------------------------------------------------------------
 
+#define TILE_SIZE 30
 
 const float MINION_SPEED = 50.0;
 const float MINION_ACCELERATION = 5.0;
@@ -159,6 +160,7 @@ Entity* getEntity(int type, int id);
 TileData* getTile(TileMap* tileMap, int x, int y);
 TileMap loadTileMap(Image* mapImage);
 TileData* getTileAt(TileMap* tileMap, Vector2 position);
+void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius);
 
 
 
@@ -250,8 +252,8 @@ void destroyEntity(int type, int id) {
 
 bool isMinionTargetRecalculationPending = false;
 int minionInventoryCount = 1000;
-
-
+TileMap currentTileMap;
+IntArray minionIdsInRange;
 
 const int spawnDeltaDis = 10;
 Vector2 lastSpawnPoint;
@@ -353,13 +355,40 @@ int spawnMinionAt(Vector2 position) {
 }
 
 
+void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius) {
+    int minX = (position.x - radius) / TILE_SIZE;
+    int maxX = (position.x + radius) / TILE_SIZE;
+    int minY = (position.y - radius) / TILE_SIZE;
+    int maxY = (position.y + radius) / TILE_SIZE;
+
+    float radiusSqr = radius * radius;
+
+
+    
+    result->used = 0;
+
+    for(int x = minX; x <= maxX; x++) {
+        for (int y = minY; y <= maxY; y++) {
+            TileData* tile = getTile(tileMap, x, y);
+            for ITERATE(i, tile->minionIds.used) {
+                int id = tile->minionIds.array[i];
+                Entity* entity = getEntity(MINION_TYPE, id);
+                if (!entity->isSpawned) continue;
+
+                if (Vector2DistanceSqr(entity->position, position) <= radiusSqr) {
+                    insertIntArray(result, id);
+                }
+            }
+        }
+    }
+}
 
 
 //------------------------------------------------------------------------------------
 // C Towers
 //------------------------------------------------------------------------------------
 
-
+#define TOWER_ATTACK_RADIUS 40
 
 int spawnTower(Vector2 position, float health) {
     assert(health > 0);
@@ -400,6 +429,14 @@ void updateTower(int id, float delta) {
         isMinionTargetRecalculationPending = true;
         destroyEntity(TOWER_TYPE, id);
     }
+
+    getMinionIdsInRange(&minionIdsInRange, &currentTileMap, tower->entity.position, TOWER_ATTACK_RADIUS);
+
+    for ITERATE(i, minionIdsInRange.used) {
+        int id = minionIdsInRange.array[i];
+        destroyEntity(MINION_TYPE, id);
+    }
+    
 }
 
 
@@ -461,7 +498,7 @@ float calculateProjectileHeight(float timePercent) {
 
 
 
-#define TILE_SIZE 30
+
 
 #define GROUND_TILE 0xffffffff
 #define PLACEABLE_TILE 0x3294c4ff
@@ -581,9 +618,10 @@ int main(void) {
     for ITERATE(type, TYPE_COUNT) {
         initClass(type);
     }
+    initIntArray(&minionIdsInRange, 100);
 
     Image tilemapImage = LoadImage("Images/Maps/TestLevel.png");
-    TileMap tileMap = loadTileMap(&tilemapImage);
+    currentTileMap = loadTileMap(&tilemapImage);
     UnloadImage(tilemapImage);
 
     // Main game loop
@@ -595,7 +633,7 @@ int main(void) {
         //----------------------------------------------------------------------------------
         float delta = GetFrameTime();
 
-        TileData* tileAtMouse = getTileAt(&tileMap, GetMousePosition());
+        TileData* tileAtMouse = getTileAt(&currentTileMap, GetMousePosition());
         bool canSpawn = minionInventoryCount > 0 && tileAtMouse != NULL && tileAtMouse->type == PLACEABLE_TILE;
 
         if (
@@ -624,7 +662,7 @@ int main(void) {
         }
 
         // Update Tilemap
-        updateTileMap(&tileMap);
+        updateTileMap(&currentTileMap);
 
 
         //----------------------------------------------------------------------------------
@@ -635,7 +673,7 @@ int main(void) {
         // Clear
         ClearBackground(RAYWHITE);
 
-        drawTileMap(&tileMap);
+        drawTileMap(&currentTileMap);
 
         for ITERATE(type, TYPE_COUNT) {
             EntityClass* entityClass = &entityClasses[type];
@@ -664,7 +702,8 @@ int main(void) {
     // De-Initialization
     //--------------------------------------------------------------------------------------
 
-    destroyTileMap(&tileMap);
+    freeIntArray(&minionIdsInRange);
+    destroyTileMap(&currentTileMap);
 
     for ITERATE(type, TYPE_COUNT) {
         destroyClass(type);
