@@ -1,0 +1,40 @@
+
+
+
+LOTS OF MINIONS
+
+Entities:
+- Unit (Player)
+- Unit (Enemy)
+- Tower (Arrow)
+- Tower (Bomb)
+- Tower (Summoning)
+- Trap (Bomb)
+- Projectile (Arrow)
+- Projectile (Bomb)
+
+Entity System?
+Towers attacking player.
+Tilemap loader (want to have set size?).
+Spawning zone.
+Pathfinding.
+Chunk Partitioning / Boids.
+Enemy Unit.
+Other Tower Types.
+Bomb Trap.
+Art.
+Path - list of coordinates 
+
+- AoE Attack
+- Pathfinding
+- Boid Movement
+- Chunk Partitioning
+- Enemy Units
+- Tilemap thing?
+
+3 towers:
+- arrow tower
+- bomb tower
+- summoning tower
+
+bomb trap

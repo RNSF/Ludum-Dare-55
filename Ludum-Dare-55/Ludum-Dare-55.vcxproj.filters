@@ -13,10 +13,21 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Resource Files\Images">
+      <UniqueIdentifier>{69cfea02-2934-442f-a10b-3de1b900828d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\Images\Maps">
+      <UniqueIdentifier>{01330cca-2a89-446a-aea6-14e9eb46c78e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\..\..\..\Downloads\TestLevel.png">
+      <Filter>Resource Files\Images\Maps</Filter>
+    </Image>
   </ItemGroup>
 </Project>

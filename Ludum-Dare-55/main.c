@@ -1,6 +1,13 @@
+#define _CRT_SECURE_NO_WARNINGS
+
 #include "raylib.h"
 #include "raymath.h"
 #include <assert.h>
+#include <stdio.h>   
+#include <stdlib.h> 
+#include <math.h>
+
+
 
 //------------------------------------------------------------------------------------
 // C Macros
@@ -27,56 +34,190 @@ const float MINION_SPEED = 50.0;
 const float MINION_ACCELERATION = 5.0;
 const Vector2 SCREEN_SIZE = { 1920 / 2, 1080 / 2 };
 const float SPAWN_PERIOD = 0.01;
+const float PROJECTILE_LIFE_TIME = 0.3;
+
+
+// Colors
+const unsigned int GROUND_COLOR = 0xF1BB87FF;
+const unsigned int GROUND_COLOR_2 = 0xF2B47AFF;
+const unsigned int PLACEABLE_COLOR = 0x2E86ABFF;
+const unsigned int PLACEABLE_COLOR_2 = 0x207295FF;
+const unsigned int PLAYER_COLOR = 0x2E86ABFF;
+const unsigned int ENEMY_COLOR = 0xA4243BFF;
 
 //------------------------------------------------------------------------------------
 // C Structs
 //------------------------------------------------------------------------------------
 
-typedef struct Minion {
+typedef struct Entity {
     Vector2 position;
-    Vector2 velocity;
-    int targetBaseId;
-    float attackCooldown;
+    float height;
     bool isSpawned;
+} Entity;
+
+typedef struct Minion {
+    Entity entity;
+    Vector2 velocity;
+    bool isPlayer;
+    int targetTowerId;
 } Minion;
 
 
-typedef struct Timer {
-    float maxTime;
-    float time;
-} Timer;
+typedef struct Tower {
+    Entity entity;
+    int health;
+} Tower;
+
+typedef struct Projectile {
+    Entity entity;
+    Vector2 startPosition;
+    Vector2 targetPosition;
+    int targetMinionId;
+    float aliveTime;
+} Projectile;
+
+typedef struct EntityClass {
+    //void (*spawnCallback);
+    //void (*destroyCallback);
+    void (*update)(int, float);
+    void (*draw)(int);
+    void* bank;
+    int bankSize;
+    int structSize;
+    int lastSpawnedId;
+} EntityClass;
+
+typedef struct TileData {
+    unsigned int type;
+    Minion* minions;
+} TileData;
+
+typedef struct TileMap {
+    int width;
+    int height;
+    TileData* tiles;
+} TileMap;
 
 
-typedef struct Base {
-    Vector2 position;
-    float health;
-    int value;
-} Base;
+
+#define MINION_TYPE 0
+#define TOWER_TYPE 1
+#define PROJECTILE_TYPE 2
+#define TYPE_COUNT 3
 
 
-//------------------------------------------------------------------------------------
-// C Vars
-//------------------------------------------------------------------------------------
-
-
-#define MAX_MINION_COUNT 5000
-Minion minions[MAX_MINION_COUNT];
-#define MINION_ATTACK_RANGE 20
-#define MINION_ATTACK_PERIOD 1
-int spawnedMinionCount = 0;
-bool isMinionTargetRecalculationPending = false;
-int minionInventoryCount = 100;
-
-#define MAX_BASE_COUNT 10
-int baseCount = 0;
-Base bases[MAX_BASE_COUNT];
+EntityClass entityClasses[TYPE_COUNT];
 
 
 //------------------------------------------------------------------------------------
 // C Func
 //------------------------------------------------------------------------------------
 
-int damageBase(int id, float damageAmount);
+void damageTower(int id, int damageAmount);
+void updateMinion(int id, float delta);
+void updateTower(int id, float delta);
+void updateProjectile(int id, float delta);
+void drawMinion(int id);
+void drawTower(int id);
+void drawProjectile(int id);
+Entity* getEntity(int type, int id);
+TileData* getTile(TileMap* tilemap, int x, int y);
+
+//------------------------------------------------------------------------------------
+// C EntityClass
+//------------------------------------------------------------------------------------
+
+void initClass(int type) {
+    EntityClass* entityClass = &entityClasses[type];
+
+    switch(type) {
+        case MINION_TYPE:
+            entityClass->bankSize = 1000;
+            entityClass->structSize = sizeof(Minion);
+            entityClass->update = &updateMinion;
+            entityClass->draw = &drawMinion;
+            break;
+        case TOWER_TYPE:
+            entityClass->bankSize = 10;
+            entityClass->structSize = sizeof(Tower);
+            entityClass->update = &updateTower;
+            entityClass->draw = &drawTower;
+            break;
+        case PROJECTILE_TYPE:
+            entityClass->bankSize = 1000;
+            entityClass->structSize = sizeof(Projectile);
+            entityClass->update = &updateProjectile;
+            entityClass->draw = &drawProjectile;
+            break;
+    }
+    
+
+    int allocSize = entityClass->bankSize * entityClass->structSize;
+    entityClass->bank = malloc(allocSize);
+    
+    for ITERATE(id, entityClass->bankSize) {
+        Entity* entity = getEntity(type, id);
+        entity->isSpawned = false;
+    }
+
+    entityClass->lastSpawnedId = -1;
+
+
+}
+
+void destroyClass(int type) {
+    EntityClass* entityClass = &entityClasses[type];
+    free(entityClass->bank);
+}
+
+
+//------------------------------------------------------------------------------------
+// C Entity
+//------------------------------------------------------------------------------------
+
+Entity* getEntity(int type, int id) {
+    return ((intptr_t)entityClasses[type].bank + id * entityClasses[type].structSize);;
+}
+
+
+int createEntity(int type) {
+    EntityClass* entityClass = &entityClasses[type];
+    for(int i = (entityClass->lastSpawnedId + 1) % entityClass->bankSize; 
+        i != entityClass->lastSpawnedId; i++)
+    {
+        Entity* entity = getEntity(type, i);
+        if (!entity->isSpawned)
+        {
+            entity->isSpawned = true;
+            return i;
+        }
+    }
+    return NULLID;
+}
+
+
+void destroyEntity(int type, int id) {
+    Entity* entity = getEntity(type, id);
+    entity->isSpawned = false;
+}
+
+
+//------------------------------------------------------------------------------------
+// C Vars
+//------------------------------------------------------------------------------------
+
+#define MINION_ATTACK_RANGE 4;
+
+
+bool isMinionTargetRecalculationPending = false;
+int minionInventoryCount = 100;
+
+
+
+const int spawnDeltaDis = 10;
+Vector2 lastSpawnPoint;
+
+
 
 
 
@@ -92,116 +233,82 @@ int damageBase(int id, float damageAmount);
 //------------------------------------------------------------------------------------
 
 
-void initMinions() {
-    foreach(Minion * minion, minions) {
-        minion->isSpawned = false;
-    }
-}
+void updateMinion(int id, float delta) {
+    Minion* minion = getEntity(MINION_TYPE, id);
 
-void updateMinions(float delta) {
-    for ITERATE(i, spawnedMinionCount) {
-        Minion* minion = &minions[i];
-        if (!minion->isSpawned) continue;
-
-        if (isMinionTargetRecalculationPending) {
-            minion->targetBaseId = calculateMinionTarget(i);
-        }
-
-        bool inRange = minion->targetBaseId != NULLID
-            && Vector2Distance(minion->position, bases[minion->targetBaseId].position) < MINION_ATTACK_RANGE;
-        // UPDATE VELOCITY
-        if (minion->targetBaseId != NULLID && !inRange) {
-            Vector2 moveDirection = Vector2Normalize(
-                Vector2Subtract(bases[minion->targetBaseId].position, minion->position)
-            );
-
-            minion->velocity = Vector2Scale(moveDirection, MINION_SPEED);
-        } else {
-            minion->velocity = Vector2Zero();
-        }
-
-        // UPDATE POSITION
-        minion->position = Vector2Add(minion->position, Vector2Scale(minion->velocity, delta));
-
-        // ATTACK
-        if (minion->attackCooldown > 0) minion->attackCooldown -= delta;
-
-        if (minion->targetBaseId != NULLID && inRange && minion->attackCooldown <= 0) {
-            minion->attackCooldown += MINION_ATTACK_PERIOD;
-
-            damageBase(minion->targetBaseId, 1);
-        }
-
-        
-        
-    }
-    isMinionTargetRecalculationPending = false;
-}
-
-void drawMinions() {
-    foreach(Minion * minion, minions) {
-        if (!minion->isSpawned) continue;
-
-        Vector2 p = minion->position;
-        DrawRectangle(p.x - 5, p.y - 5, 10, 10, RED);
-    }
-}
-
-
-
-
-
-int destroyMinion(int id) {
-    assert(id >= 0 && id < spawnedMinionCount);
-    minions[id].isSpawned = false;
-}
-
-void cleanMinions() {
-    int newSpawnedMinionCount = 0;
-    for (int i = 0; i < spawnedMinionCount; i++) {
-        Minion *minion = &minions[i];
-        if (minion->isSpawned) {
-            newSpawnedMinionCount++;
-            minions[spawnedMinionCount] = minions[i];
-        }
+    if (isMinionTargetRecalculationPending) {
+        minion->targetTowerId = calculateMinionTarget(id);
     }
 
-    spawnedMinionCount = newSpawnedMinionCount;
+    bool inRange = minion->targetTowerId != NULLID
+        && Vector2Distance(minion->entity.position, getEntity(TOWER_TYPE, minion->targetTowerId)->position) < MINION_ATTACK_RANGE;
+    // UPDATE VELOCITY
+    if (minion->targetTowerId != NULLID && !inRange) {
+        Entity* targetEntity = getEntity(TOWER_TYPE, minion->targetTowerId);
+        Vector2 moveDirection = Vector2Normalize(
+            Vector2Subtract(targetEntity->position, minion->entity.position)
+        );
+
+        minion->velocity = Vector2Scale(moveDirection, MINION_SPEED);
+    }
+    else {
+        minion->velocity = Vector2Zero();
+    }
+
+    
+
+    // ATTACK
+    if (minion->targetTowerId != NULLID && inRange) {
+        damageTower(minion->targetTowerId, 1);
+        destroyEntity(MINION_TYPE, id);
+        return;
+    }
+
+    // UPDATE POSITION
+    minion->entity.position = Vector2Add(minion->entity.position, Vector2Scale(minion->velocity, delta));
 }
+
+void drawMinion(int id) {
+    Minion* minion = getEntity(MINION_TYPE, id);
+    if (!minion->entity.isSpawned) return;
+
+    Vector2 p = minion->entity.position;
+    DrawRectangle(p.x - 5, p.y - 5, 10, 10, RED);
+}
+
 
 int calculateMinionTarget(int id) {
-    Minion* minion = &minions[id];
+    Minion* minion = getEntity(MINION_TYPE, id);
 
-    if (baseCount == 0) 
-        return NULLID;
+    bool towerExists = false;
+    int closestTowerId = NULLID;
+    float sqrDistance = INFINITY;
+    for ITERATE(i, entityClasses[TOWER_TYPE].bankSize) {
+        Tower* tower = getEntity(TOWER_TYPE, i);
+        if (!tower->entity.isSpawned) continue;
 
-    int closestBaseId = 0;
-    float sqrDistance = Vector2DistanceSqr(minion->position, bases[closestBaseId].position);
-    for (int i = 1; i < baseCount; i++) {
-        Base * base = &bases[i];
-        float sqrDistance2 = Vector2DistanceSqr(minion->position, base->position);
+        float sqrDistance2 = Vector2DistanceSqr(minion->entity.position, tower->entity.position);
         if (sqrDistance2 < sqrDistance)
         {
-            closestBaseId = i;
+            closestTowerId = i;
             sqrDistance = sqrDistance2;
         }
     }
 
-    return closestBaseId;
+    return closestTowerId;
 }
 
 
 int spawnMinionAt(Vector2 position) {
-    if (spawnedMinionCount >= MAX_MINION_COUNT) return NULLID;
-    int id = spawnedMinionCount++;
+    
+    int id = createEntity(MINION_TYPE);
+    if (id == NULLID) return;
 
-    Minion* minion = &minions[id];
+    Minion* minion = getEntity(MINION_TYPE, id);
 
-    minion->isSpawned = true;
-    minion->position = position;
+    minion->entity.position = position;
     minion->velocity = (Vector2){ 0, 0 };
-    minion->targetBaseId = calculateMinionTarget(id);
-    minion->attackCooldown = 0;
+    minion->targetTowerId = calculateMinionTarget(id);
 
     return id;
 }
@@ -210,102 +317,230 @@ int spawnMinionAt(Vector2 position) {
 
 
 //------------------------------------------------------------------------------------
-// C Bases
+// C Towers
 //------------------------------------------------------------------------------------
 
 
 
-int spawnBase(Vector2 position, float health, int value)
-{
+int spawnTower(Vector2 position, float health) {
     assert(health > 0);
 
-    if (baseCount >= MAX_BASE_COUNT) return NULLID;
+    int id = createEntity(TOWER_TYPE);
+    if (id == NULLID) return;
     
-    int id = baseCount++;
-    Base* base = &bases[id];
-    base->health = health;
-    base->position = position;
-    base->value = 100;
+    Tower* tower = getEntity(TOWER_TYPE, id);
+    tower->health = health;
+    tower->entity.position = position;
 
     isMinionTargetRecalculationPending = true;
 
     return id;
 }
 
-int damageBase(int id, float damageAmount)
-{
-    bases[id].health -= damageAmount;
+void drawTower(int id) {
+    Tower* tower = getEntity(TOWER_TYPE, id);
+    DrawCircleV(tower->entity.position, 10, YELLOW);
+
+    char str[8];
+    sprintf(str, "%d", (int) ceil(tower->health));
+    DrawText(str, tower->entity.position.x, tower->entity.position.y, 12, BLACK);
 }
 
-int destroyBase(int id)
-{
-    minionInventoryCount += bases[id].value;
-    bases[id] = bases[--baseCount];
-    isMinionTargetRecalculationPending = true;
-    
+void damageTower(int id, int damageAmount) {
+    Tower* tower = getEntity(TOWER_TYPE, id);
+    tower->health -= damageAmount;
 }
 
-void updateBases()
-{
-    for ITERATE(i, baseCount)
-    {
-        if (bases[i].health <= 0) 
-        {
-            destroyBase(i);
-        }
+
+
+void updateTower(int id, float delta) {
+    Tower* tower = getEntity(TOWER_TYPE, id);
+    if (tower->health <= 0) {
+        minionInventoryCount += 20;
+        isMinionTargetRecalculationPending = true;
+        destroyEntity(TOWER_TYPE, id);
     }
 }
 
 
+//------------------------------------------------------------------------------------
+// C Projectile
+//------------------------------------------------------------------------------------
+
+void drawProjectile(int id) {
+    Projectile* projectile = getEntity(TOWER_TYPE, id);
+    
+    DrawRectangleV(projectile->entity.position, (Vector2){5, 5}, ORANGE);
+}
+
+
+void updateProjectile(int id, float delta) {
+    Projectile* projectile = getEntity(PROJECTILE_TYPE, id);
+
+    // Update target position
+    if (projectile->targetMinionId != NULLID) {
+        Minion* targetMinion = getEntity(MINION_TYPE, projectile->targetMinionId);
+        if (!targetMinion->entity.isSpawned) {
+            projectile->targetMinionId = NULLID;
+        } else {
+            projectile->targetPosition = targetMinion->entity.position;
+        }
+    }
+
+    // Update alive time
+    projectile->aliveTime += delta;
+
+    if (projectile->aliveTime >= 1.0) {
+        if (projectile->targetMinionId != NULLID) {
+            destroyEntity(MINION_TYPE, projectile->targetMinionId);
+        }
+        return destroyEntity(PROJECTILE_TYPE, id);
+    }
+
+    // Update position / height
+    float alivePercentage = projectile->aliveTime / PROJECTILE_LIFE_TIME;
+
+    projectile->entity.position = Vector2Lerp(projectile->startPosition, projectile->targetPosition, alivePercentage);
+    projectile->entity.height = calculateProjectileHeight(alivePercentage);
+    
+
+}
+
+float calculateProjectileHeight(float timePercent) {
+    static const float startHeight = 10.0;
+    static const float peakHeight = 20.0;
+
+    return -peakHeight * (timePercent - 1) * (timePercent + startHeight / peakHeight);
+}
 
 
 
+//------------------------------------------------------------------------------------
+// C Map
+//------------------------------------------------------------------------------------
+
+
+
+#define MAP_WIDTH 30
+#define MAP_HEIGHT 18
+#define TILE_SIZE 30
+
+#define GROUND_TILE 0xffffffff
+#define PLACEABLE_TILE 0x3294c4ff
+
+TileData tiles[MAP_WIDTH][MAP_HEIGHT];
+
+TileMap loadMap(Image* mapImage) {
+    TileMap tilemap;
+    tilemap.width = mapImage->width;
+    tilemap.height = mapImage->height;
+
+    tilemap.tiles = malloc(sizeof(TileData) * tilemap.width * tilemap.height);
+
+    for ITERATE(x, mapImage->width) {
+        for ITERATE(y, mapImage->height) {
+            TileData* tileData = getTile(&tilemap, x, y);
+
+            Color color = GetImageColor(*mapImage, x, y);
+            tileData->type = ColorToInt(color);
+            
+            Vector2 position = {
+                (x + 0.5) * TILE_SIZE,
+                (y + 0.5) * TILE_SIZE
+            };
+
+            if (color.g == 0 && color.b == 0) {
+                // SPAWN TOWER
+                spawnTower(position, color.r * 10);
+                tileData->type = GROUND_TILE;
+            }
+
+            
+        }
+    }
+
+    return tilemap;
+}
+
+TileData* getTile(TileMap* tilemap, int x, int y) {
+    return & tilemap->tiles[x + y * tilemap->width];
+}
+
+void drawMap(TileMap* tilemap) {
+    for ITERATE(x, tilemap->width) {
+        for ITERATE(y, tilemap->height) {
+            TileData* tile = getTile(tilemap, x, y);
+            bool isDark = ((x / 3) % 2) ^ ((y / 3) % 2);
+            Rectangle tileBounds = { 
+                x * TILE_SIZE, y * TILE_SIZE,
+                (x + 1) * TILE_SIZE, (y + 1) * TILE_SIZE,
+            };
+
+            switch(tile->type) {
+                case GROUND_TILE:
+                    DrawRectangleRec(tileBounds, GetColor(isDark ? GROUND_COLOR_2 : GROUND_COLOR));
+                    break;
+                case PLACEABLE_TILE:
+                    DrawRectangleRec(tileBounds, GetColor(isDark ? PLACEABLE_COLOR_2 : PLACEABLE_COLOR));
+                    break;
+            }
+        }
+    }
+}
 
 //------------------------------------------------------------------------------------
 // Program main entry point
 //------------------------------------------------------------------------------------
-int main(void)
-{
+int main(void) {
     // Initialization
     //--------------------------------------------------------------------------------------
-
-    initMinions();
 
     InitWindow(SCREEN_SIZE.x, SCREEN_SIZE.y, "raylib [core] example - basic window");
 
     SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
+    for ITERATE(type, TYPE_COUNT) {
+        initClass(type);
+    }
 
-    Timer spawnTimer = { .maxTime = SPAWN_PERIOD };
-    spawnTimer.time = spawnTimer.maxTime;
+    Image tilemapImage = LoadImage("Images/Maps/TestLevel.png");
+    TileMap tileMap = loadMap(&tilemapImage);
+    UnloadImage(tilemapImage);
 
     // Main game loop
     while (!WindowShouldClose())    // Detect window close button or ESC key
     {
-        // Update
+        // M Update
         //----------------------------------------------------------------------------------
         // TODO: Update your variables here
         //----------------------------------------------------------------------------------
         float delta = GetFrameTime();
 
-        spawnTimer.time -= delta;
-
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && spawnTimer.time <= 0 && minionInventoryCount > 0) {
-            spawnTimer.time = spawnTimer.maxTime;
+        if (
+            minionInventoryCount > 0
+            && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)
+            || (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && Vector2Distance(GetMousePosition(), lastSpawnPoint) >= spawnDeltaDis))) {
+            Vector2 spawnPoint = GetMousePosition();
+            lastSpawnPoint = spawnPoint;
             minionInventoryCount--;
-            spawnMinionAt(GetMousePosition());
+            spawnMinionAt(spawnPoint);
         }
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
         {
-            spawnBase(GetMousePosition(), 100, 100);
+            spawnTower(GetMousePosition(), 100);
         }
 
-        // Update minions
-        cleanMinions();
-        updateMinions(GetFrameTime());
-        updateBases(GetFrameTime());
+        // Update
+        for ITERATE(type, TYPE_COUNT) {
+            EntityClass* entityClass = &entityClasses[type];
+            for ITERATE(id, entityClass->bankSize) {
+                Entity* entity = getEntity(type, id);
+                if (!entity->isSpawned) continue;
+                entityClass->update(id, delta);
+            }
+        }
 
 
         //----------------------------------------------------------------------------------
@@ -316,16 +551,17 @@ int main(void)
         // Clear
         ClearBackground(RAYWHITE);
 
-        drawMinions();
+        drawMap(&tileMap);
 
-        for ITERATE(i, baseCount) {
-            Base * base = &bases[i];
-            DrawCircleV(base->position, 10, YELLOW);
-
-            char str[8];
-            sprintf(str, "%d", (int) ceil(base->health));
-            DrawText(str, base->position.x, base->position.y, 12, BLACK);
+        for ITERATE(type, TYPE_COUNT) {
+            EntityClass* entityClass = &entityClasses[type];
+            for ITERATE(id, entityClass->bankSize) {
+                Entity* entity = getEntity(type, id);
+                if (!entity->isSpawned) continue;
+                entityClass->draw(id);
+            }
         }
+
 
         // Gui
 
@@ -339,8 +575,15 @@ int main(void)
         //----------------------------------------------------------------------------------
     }
 
+
+
     // De-Initialization
     //--------------------------------------------------------------------------------------
+
+    for ITERATE(type, TYPE_COUNT) {
+        destroyClass(type);
+    }
+
     CloseWindow();        // Close window and OpenGL context
     //--------------------------------------------------------------------------------------
 
