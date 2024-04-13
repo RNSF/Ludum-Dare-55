@@ -13,7 +13,7 @@
 // C Macros
 //------------------------------------------------------------------------------------
 
-#define DEBUG_MODE true
+#define DEBUG_MODE false
 #define NULLID -1
 #define foreach(item, array) \
     for(int keep = 1, \
