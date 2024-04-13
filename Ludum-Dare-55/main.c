@@ -35,7 +35,8 @@ const float SPAWN_PERIOD = 0.01;
 typedef struct Minion {
     Vector2 position;
     Vector2 velocity;
-    Vector2 targetPosition;
+    int targetBaseId;
+    float attackCooldown;
     bool isSpawned;
 } Minion;
 
@@ -49,6 +50,7 @@ typedef struct Timer {
 typedef struct Base {
     Vector2 position;
     float health;
+    int value;
 } Base;
 
 
@@ -59,11 +61,31 @@ typedef struct Base {
 
 #define MAX_MINION_COUNT 5000
 Minion minions[MAX_MINION_COUNT];
+#define MINION_ATTACK_RANGE 20
+#define MINION_ATTACK_PERIOD 1
 int spawnedMinionCount = 0;
+bool isMinionTargetRecalculationPending = false;
+int minionInventoryCount = 100;
 
 #define MAX_BASE_COUNT 10
 int baseCount = 0;
 Base bases[MAX_BASE_COUNT];
+
+
+//------------------------------------------------------------------------------------
+// C Func
+//------------------------------------------------------------------------------------
+
+int damageBase(int id, float damageAmount);
+
+
+
+
+//------------------------------------------------------------------------------------
+// C Utils
+//------------------------------------------------------------------------------------
+
+
 
 //------------------------------------------------------------------------------------
 // C Minions
@@ -77,21 +99,43 @@ void initMinions() {
 }
 
 void updateMinions(float delta) {
-    foreach(Minion * minion, minions) {
+    for ITERATE(i, spawnedMinionCount) {
+        Minion* minion = &minions[i];
         if (!minion->isSpawned) continue;
 
-        // UPDATE VELOCITY
-        Vector2 moveDirection = Vector2Normalize(
-            Vector2Subtract(minion->targetPosition, minion->position)
-        );
+        if (isMinionTargetRecalculationPending) {
+            minion->targetBaseId = calculateMinionTarget(i);
+        }
 
-        minion->velocity = Vector2Scale(moveDirection, MINION_SPEED);
+        bool inRange = minion->targetBaseId != NULLID
+            && Vector2Distance(minion->position, bases[minion->targetBaseId].position) < MINION_ATTACK_RANGE;
+        // UPDATE VELOCITY
+        if (minion->targetBaseId != NULLID && !inRange) {
+            Vector2 moveDirection = Vector2Normalize(
+                Vector2Subtract(bases[minion->targetBaseId].position, minion->position)
+            );
+
+            minion->velocity = Vector2Scale(moveDirection, MINION_SPEED);
+        } else {
+            minion->velocity = Vector2Zero();
+        }
 
         // UPDATE POSITION
         minion->position = Vector2Add(minion->position, Vector2Scale(minion->velocity, delta));
 
+        // ATTACK
+        if (minion->attackCooldown > 0) minion->attackCooldown -= delta;
+
+        if (minion->targetBaseId != NULLID && inRange && minion->attackCooldown <= 0) {
+            minion->attackCooldown += MINION_ATTACK_PERIOD;
+
+            damageBase(minion->targetBaseId, 1);
+        }
+
+        
         
     }
+    isMinionTargetRecalculationPending = false;
 }
 
 void drawMinions() {
@@ -125,25 +169,25 @@ void cleanMinions() {
     spawnedMinionCount = newSpawnedMinionCount;
 }
 
-Vector2 calculateMinionTarget(int id) {
+int calculateMinionTarget(int id) {
     Minion* minion = &minions[id];
 
-    if (!baseCount) 
-        return minion->position;
+    if (baseCount == 0) 
+        return NULLID;
 
-    Base *closestBase = &bases[0];
-    float sqrDistance = Vector2DistanceSqr(minion->position, closestBase->position);
+    int closestBaseId = 0;
+    float sqrDistance = Vector2DistanceSqr(minion->position, bases[closestBaseId].position);
     for (int i = 1; i < baseCount; i++) {
         Base * base = &bases[i];
         float sqrDistance2 = Vector2DistanceSqr(minion->position, base->position);
         if (sqrDistance2 < sqrDistance)
         {
-            closestBase = base;
+            closestBaseId = i;
             sqrDistance = sqrDistance2;
         }
     }
 
-    return closestBase->position;
+    return closestBaseId;
 }
 
 
@@ -156,7 +200,8 @@ int spawnMinionAt(Vector2 position) {
     minion->isSpawned = true;
     minion->position = position;
     minion->velocity = (Vector2){ 0, 0 };
-    minion->targetPosition = calculateMinionTarget(id);
+    minion->targetBaseId = calculateMinionTarget(id);
+    minion->attackCooldown = 0;
 
     return id;
 }
@@ -170,7 +215,7 @@ int spawnMinionAt(Vector2 position) {
 
 
 
-int spawnBase(Vector2 position, float health)
+int spawnBase(Vector2 position, float health, int value)
 {
     assert(health > 0);
 
@@ -180,6 +225,9 @@ int spawnBase(Vector2 position, float health)
     Base* base = &bases[id];
     base->health = health;
     base->position = position;
+    base->value = 100;
+
+    isMinionTargetRecalculationPending = true;
 
     return id;
 }
@@ -187,13 +235,25 @@ int spawnBase(Vector2 position, float health)
 int damageBase(int id, float damageAmount)
 {
     bases[id].health -= damageAmount;
-    if (bases[id].health <= 0)
-        destroyBase(id);
 }
 
 int destroyBase(int id)
 {
+    minionInventoryCount += bases[id].value;
     bases[id] = bases[--baseCount];
+    isMinionTargetRecalculationPending = true;
+    
+}
+
+void updateBases()
+{
+    for ITERATE(i, baseCount)
+    {
+        if (bases[i].health <= 0) 
+        {
+            destroyBase(i);
+        }
+    }
 }
 
 
@@ -231,19 +291,21 @@ int main(void)
 
         spawnTimer.time -= delta;
 
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && spawnTimer.time <= 0) {
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && spawnTimer.time <= 0 && minionInventoryCount > 0) {
             spawnTimer.time = spawnTimer.maxTime;
+            minionInventoryCount--;
             spawnMinionAt(GetMousePosition());
         }
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
         {
-            spawnBase(GetMousePosition(), 10);
+            spawnBase(GetMousePosition(), 100, 100);
         }
 
         // Update minions
         cleanMinions();
         updateMinions(GetFrameTime());
+        updateBases(GetFrameTime());
 
 
         //----------------------------------------------------------------------------------
@@ -257,8 +319,21 @@ int main(void)
         drawMinions();
 
         for ITERATE(i, baseCount) {
-            DrawCircleV(bases[i].position, 10, YELLOW);
+            Base * base = &bases[i];
+            DrawCircleV(base->position, 10, YELLOW);
+
+            char str[8];
+            sprintf(str, "%d", (int) ceil(base->health));
+            DrawText(str, base->position.x, base->position.y, 12, BLACK);
         }
+
+        // Gui
+
+        char str[8];
+        sprintf(str, "%d", minionInventoryCount);
+        DrawText(str, 10, 10, 30, BLACK);
+
+        //DrawFPS(10, 10);
 
         EndDrawing();
         //----------------------------------------------------------------------------------
