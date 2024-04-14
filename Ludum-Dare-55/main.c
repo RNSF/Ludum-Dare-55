@@ -70,6 +70,75 @@ inline int imax(int i1, int i2) {
     return i1 > i2 ? i1 : i2;
 }
 
+
+// Draw anchored
+
+void drawSpriteAnchored(Texture2D texture, Vector2 position, float rotation, Vector2 anchor, Color tint) {
+    DrawTexturePro(texture, (Rectangle) { 0, 0, texture.width, texture.height }, 
+                            (Rectangle) { position.x, position.y, texture.width, texture.height },
+                    Vector2Multiply(anchor, (Vector2){ texture.width , texture.height}), rotation, tint
+    );
+}
+
+
+//------------------------------------------------------------------------------------
+// C Camera
+//------------------------------------------------------------------------------------
+
+Camera2D camera;
+
+void setCameraCenter(Camera2D* c, Vector2 center) {
+
+    c->offset = Vector2Subtract((Vector2){ GetScreenWidth()  / 2, GetScreenHeight() / 2}, Vector2Scale(center, c->zoom));
+}
+
+
+//------------------------------------------------------------------------------------
+// C Sprites
+//------------------------------------------------------------------------------------
+
+
+Texture2D PLAYER_MINION_SPRITE;
+Texture2D ENEMY_MINION_SPRITE;
+Texture2D ARCHER_TOWER_SPRITE;
+Texture2D BOMB_TOWER_SPRITE;
+Texture2D SUMMONING_TOWER_SPRITE;
+Texture2D TRAP_SPRITE;
+Texture2D ARROW_SPRITE;
+Texture2D BOMB_SPRITE;
+Texture2D MINION_SHADOW_SPRITE;
+Texture2D TRAP_SHADOW_SPRITE;
+Texture2D TOWER_SHADOW_SPRITE;
+
+void loadSprites() {
+    PLAYER_MINION_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    ENEMY_MINION_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    ARCHER_TOWER_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    BOMB_TOWER_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    SUMMONING_TOWER_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    TRAP_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    ARROW_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    BOMB_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    MINION_SHADOW_SPRITE = LoadTexture("Images/Entities/MinionShadow.png");
+    TRAP_SHADOW_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    TOWER_SHADOW_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+}
+
+void unloadSprites() {
+    UnloadTexture(PLAYER_MINION_SPRITE);
+    UnloadTexture(ENEMY_MINION_SPRITE);
+    UnloadTexture(ARCHER_TOWER_SPRITE);
+    UnloadTexture(BOMB_TOWER_SPRITE);
+    UnloadTexture(SUMMONING_TOWER_SPRITE);
+    UnloadTexture(TRAP_SPRITE);
+    UnloadTexture(ARROW_SPRITE);
+    UnloadTexture(BOMB_SPRITE);
+    UnloadTexture(MINION_SHADOW_SPRITE);
+    UnloadTexture(TRAP_SHADOW_SPRITE);
+    UnloadTexture(TOWER_SHADOW_SPRITE);
+}
+
+
 //------------------------------------------------------------------------------------
 // C Consts
 //------------------------------------------------------------------------------------
@@ -97,6 +166,7 @@ const unsigned int ENEMY_COLOR = 0xA4243BFF;
 typedef struct Entity {
     Vector2 position;
     float height;
+    float lifeTime;
     bool isSpawned;
 } Entity;
 
@@ -134,6 +204,7 @@ typedef struct EntityClass {
     int bankSize;
     int structSize;
     int lastSpawnedId;
+    int spawnCount;
 } EntityClass;
 
 typedef struct TileData {
@@ -146,6 +217,11 @@ typedef struct TileMap {
     int height;
     TileData* tiles;
 } TileMap;
+
+typedef struct Level {
+    char* imagePath;
+    int startingMinionCount;
+} Level;
 
 
 
@@ -176,7 +252,7 @@ TileData* getTileAt(TileMap* tileMap, Vector2 position);
 void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius);
 int spawnProjectile(Vector2 startPosition, int targetMinionId, float totalAliveTime);
 float calculateProjectileHeight(float timePercent);
-
+void loadLevel(Level* level);
 
 //------------------------------------------------------------------------------------
 // C EntityClass
@@ -244,6 +320,8 @@ int createEntity(int type) {
         if (!entity->isSpawned)
         {
             entity->isSpawned = true;
+            entity->lifeTime = 0;
+            entityClass->spawnCount++;
             return i;
         }
     }
@@ -254,6 +332,7 @@ int createEntity(int type) {
 void destroyEntity(int type, int id) {
     Entity* entity = getEntity(type, id);
     entity->isSpawned = false;
+    entityClasses[type].spawnCount--;
 }
 
 
@@ -264,8 +343,8 @@ void destroyEntity(int type, int id) {
 #define MINION_ATTACK_RANGE 4;
 
 
-bool isMinionTargetRecalculationPending = false;
-int minionInventoryCount = 1000;
+bool isMinionTargetRecalculationPending;
+int minionInventoryCount;
 TileMap currentTileMap;
 IntArray minionIdsInRange;
 
@@ -328,7 +407,10 @@ void drawMinion(int id) {
     if (!minion->entity.isSpawned) return;
 
     Vector2 p = minion->entity.position;
-    DrawRectangle(p.x - 5, p.y - 5, 10, 10, RED);
+    //DrawRectangle(p.x - 5, p.y - 5, 10, 10, RED);
+
+    drawSpriteAnchored(PLAYER_MINION_SPRITE, p, 0, (Vector2) { 0.5, 1.0 }, GetColor(PLAYER_COLOR));
+    drawSpriteAnchored(MINION_SHADOW_SPRITE, p, 0, (Vector2) { 0.5, 0.5 }, WHITE);
 }
 
 
@@ -629,7 +711,7 @@ void drawTileMap(TileMap* tileMap) {
             bool isDark = ((x / 3) % 2) ^ ((y / 3) % 2);
             Rectangle tileBounds = { 
                 x * TILE_SIZE, y * TILE_SIZE,
-                (x + 1) * TILE_SIZE, (y + 1) * TILE_SIZE,
+                TILE_SIZE, TILE_SIZE,
             };
 
             switch(tile->type) {
@@ -665,6 +747,64 @@ TileData* getTileAt(TileMap* tileMap, Vector2 position) {
 }
 
 
+
+//------------------------------------------------------------------------------------
+// C LoadLevel
+//------------------------------------------------------------------------------------
+
+
+
+#define LEVEL_COUNT 8
+Level levels[LEVEL_COUNT];
+int currentLevelNumber = -1;
+
+void initLevels() {
+    levels[0] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
+    levels[1] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
+    levels[2] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
+    levels[3] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
+    levels[4] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
+    levels[5] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
+    levels[6] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
+    levels[7] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
+}
+
+void loadNextLevel() {
+    loadLevel(&levels[++currentLevelNumber]);
+}
+
+void loadLevel(Level* level) {
+    // Load map
+    Image tilemapImage = LoadImage(level->imagePath);
+    currentTileMap = loadTileMap(&tilemapImage);
+    UnloadImage(tilemapImage);
+
+    // Reset Array
+    freeIntArray(&minionIdsInRange);
+    initIntArray(&minionIdsInRange, 100);
+
+    // Reset Values
+    isMinionTargetRecalculationPending = false;
+    minionInventoryCount = level->startingMinionCount;
+
+   
+
+    camera.zoom = 0.75;
+    setCameraCenter(&camera, (Vector2) {
+        currentTileMap.width * TILE_SIZE / 2,
+        currentTileMap.height * TILE_SIZE / 2
+    });
+    /*setCameraCenter(&camera, (Vector2) {
+        0,
+        0
+    });*/
+    
+}
+
+
+
+
+
 //------------------------------------------------------------------------------------
 // Program main entry point
 //------------------------------------------------------------------------------------
@@ -680,12 +820,13 @@ int main(void) {
     for ITERATE(type, TYPE_COUNT) {
         initClass(type);
     }
-    initIntArray(&minionIdsInRange, 100);
+    
+    initLevels();
+    
 
-    Image tilemapImage = LoadImage("Images/Maps/TestLevel.png");
-    currentTileMap = loadTileMap(&tilemapImage);
-    UnloadImage(tilemapImage);
+    loadSprites();
 
+    loadNextLevel();
     // Main game loop
     while (!WindowShouldClose())    // Detect window close button or ESC key
     {
@@ -719,6 +860,7 @@ int main(void) {
             for ITERATE(id, entityClass->bankSize) {
                 Entity* entity = getEntity(type, id);
                 if (!entity->isSpawned) continue;
+                entity->lifeTime += delta;
                 entityClass->update(id, delta);
             }
         }
@@ -735,6 +877,10 @@ int main(void) {
         // Clear
         ClearBackground(RAYWHITE);
 
+        // World
+        BeginMode2D(camera);                         
+                                     
+
         drawTileMap(&currentTileMap);
 
         for ITERATE(type, TYPE_COUNT) {
@@ -746,7 +892,7 @@ int main(void) {
             }
         }
 
-
+        EndMode2D(camera);
         // Gui
 
         char str[8];
@@ -763,6 +909,8 @@ int main(void) {
 
     // De-Initialization
     //--------------------------------------------------------------------------------------
+
+    unloadSprites();
 
     freeIntArray(&minionIdsInRange);
     destroyTileMap(&currentTileMap);
