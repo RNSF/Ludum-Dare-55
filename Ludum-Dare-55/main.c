@@ -13,7 +13,7 @@
 // C Macros
 //------------------------------------------------------------------------------------
 
-#define DEBUG_MODE true
+#define DEBUG_MODE false
 #define NULLID -1
 #define foreach(item, array) \
     for(int keep = 1, \
@@ -162,6 +162,8 @@ Texture2D TOWER_SHADOW_SPRITE;
 Texture2D DUST_PARTICLE_SPRITE;
 Texture2D BRICK_PARTICLE_SPRITE;
 Texture2D FLASH_PARTICLE_SPRITE;
+Texture2D TITLE_SPRITE;
+Texture2D ICON_SPRITE;
 
 void loadSprites() {
     PLAYER_MINION_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
@@ -178,6 +180,8 @@ void loadSprites() {
     DUST_PARTICLE_SPRITE = LoadTexture("Images/Entities/DustParticle.png");
     BRICK_PARTICLE_SPRITE = LoadTexture("Images/Entities/BrickParticle.png");
     FLASH_PARTICLE_SPRITE = LoadTexture("Images/Entities/FlashParticle.png");
+    TITLE_SPRITE = LoadTexture("Images/UI/Title.png");
+    ICON_SPRITE = LoadTexture("Images/UI/Icon.png");
 }
 
 void unloadSprites() {
@@ -195,6 +199,8 @@ void unloadSprites() {
     UnloadTexture(DUST_PARTICLE_SPRITE);
     UnloadTexture(BRICK_PARTICLE_SPRITE);
     UnloadTexture(FLASH_PARTICLE_SPRITE);
+    UnloadTexture(TITLE_SPRITE);
+    UnloadTexture(ICON_SPRITE);
 }
 
 
@@ -225,6 +231,7 @@ const float ENEMY_MINION_SPEED = 80;
 const float MINION_ACCELERATION = 10.0;
 const Vector2 SCREEN_SIZE = { 900, 18 * 30 };
 const float SPAWN_PERIOD = 0.01;
+
 
 enum GetMinionMode {
     PLAYER_ONLY,
@@ -331,6 +338,7 @@ typedef struct Level {
     char* imagePath;
     char* description;
     int startingMinionCount;
+    bool isDebugLevel;
 } Level;
 
 typedef struct GlobalId {
@@ -491,14 +499,17 @@ Entity* getEntity(int type, int id) {
 int createEntity(int type) {
     EntityClass* entityClass = &entityClasses[type];
     for(int i = (entityClass->lastSpawnedId + 1) % entityClass->bankSize; 
-        i != entityClass->lastSpawnedId; i++)
+        i != entityClass->lastSpawnedId; i = (i+1) % entityClass->bankSize)
     {
+        assert(i >= 0);
+        assert(i < entityClass->bankSize);
         Entity* entity = getEntity(type, i);
         if (!entity->isSpawned)
         {
             entity->isSpawned = true;
             entity->lifeTime = 0;
             entityClass->spawnCount++;
+            entityClass->lastSpawnedId = i;
             return i;
         }
     }
@@ -601,18 +612,25 @@ void sortGlobalIdArrayByDepth(GlobalIdArray* a) {
 //------------------------------------------------------------------------------------
 
 #define MINION_ATTACK_RANGE 8
+#define MAX_ENEMY_MINION_COUNT 300
+#define LEVEL_COUNT 8
 
-
+Level levels[LEVEL_COUNT];
 bool isMinionTargetRecalculationPending;
 int minionInventoryCount;
 float timeSinceLastInventoryIncrease;
 float timeSinceLastInventoryDecrease;
+int currentLevelNumber = 0;
+int pendingLevelNumber = -1;
+float levelStartTime = 0.0;
 TileMap currentTileMap;
 IntArray minionIdsInRange;
 GlobalIdArray allEntities;
 RenderTexture2D worldRenderTexture;
 float LEVEL_TRANSITION_TIME_MAX = 1.0;
 float levelTransitionTime = 0.0;
+int enemyMinionCount;
+bool hasPlacedMinion;
 
 const int spawnDeltaDis = 10;
 Vector2 lastSpawnPoint;
@@ -632,9 +650,10 @@ Vector2 lastSpawnPoint;
 // C Minions
 //------------------------------------------------------------------------------------
 
-#define ENEMY_MINION_VIEW_RADIUS 150
+#define ENEMY_MINION_VIEW_RADIUS_LONG 600
+#define ENEMY_MINION_VIEW_RADIUS_SHORT 300
 
-void minionKickDust(Vector2 position) {
+void particleKickDust(Vector2 position) {
     spawnParticle(
         (Vector3) { position.x - 10, position.y, 5 }, 
         &DUST_PARTICLE_SPRITE,
@@ -672,13 +691,23 @@ void updateMinion(int id, float delta) {
             minion->targetId = NULLID;
 
             // Find new minion to attack
-            getMinionIdsInRange(&minionIdsInRange, &currentTileMap, minion->entity.position, ENEMY_MINION_VIEW_RADIUS, PLAYER_ONLY);
+            getMinionIdsInRange(&minionIdsInRange, &currentTileMap, minion->entity.position, ENEMY_MINION_VIEW_RADIUS_SHORT, PLAYER_ONLY);
 
             // Filter to only non targted minions
             int count = minionIdsInRange.used;
+            int newTargetId = NULLID;
+
+            if (count)
+            {
+                int newI = GetRandomValue(0, minionIdsInRange.used - 1);
+                newTargetId = minionIdsInRange.array[newI];
+            }
+
+            getMinionIdsInRange(&minionIdsInRange, &currentTileMap, minion->entity.position, ENEMY_MINION_VIEW_RADIUS_LONG, PLAYER_ONLY);
+            count = minionIdsInRange.used;
             int j = 0;
+            // PREFER NON USED MINION
             for ITERATE(i, count) {
-                int i = GetRandomValue(0, minionIdsInRange.used - 1);
                 int id = minionIdsInRange.array[i];
                 Minion* minion = getEntity(MINION_TYPE, id);
 
@@ -692,11 +721,17 @@ void updateMinion(int id, float delta) {
 
             if (minionIdsInRange.used > 0) {
                 int i = GetRandomValue(0, minionIdsInRange.used - 1);
-                int id = minionIdsInRange.array[i];
-                Minion* targetMinion = getEntity(MINION_TYPE, id);
-                targetMinion->isMinionTargeted = true;
-                minion->targetId = id;
+                newTargetId = minionIdsInRange.array[i];
             }
+
+            if (newTargetId != NULLID)
+            {
+                Minion* targetMinion = getEntity(MINION_TYPE, newTargetId);
+                targetMinion->isMinionTargeted = true;
+                minion->targetId = newTargetId;
+                particleKickDust(minion->entity.position);
+            }
+            
         }
     }
 
@@ -755,7 +790,9 @@ void drawMinion(int id) {
 
 
 void onMinionDestroyed(int id) {
-    minionKickDust(getEntity(MINION_TYPE, id)->position);
+    Minion* minion = getEntity(MINION_TYPE, id);
+    if (!minion->isPlayer) enemyMinionCount--;
+    particleKickDust(minion->entity.position);
 }
 
 
@@ -783,6 +820,8 @@ int calculateMinionTarget(int id) {
 
 int spawnMinionAt(Vector2 position, bool isPlayer) {
     
+    if (!isPlayer && enemyMinionCount >= MAX_ENEMY_MINION_COUNT) return NULLID;
+
     int id = createEntity(MINION_TYPE);
     if (id == NULLID) return NULLID;
 
@@ -795,7 +834,9 @@ int spawnMinionAt(Vector2 position, bool isPlayer) {
     minion->isProjectileTargeted = false;
     minion->isMinionTargeted = false;
 
-    minionKickDust(minion->entity.position);
+    particleKickDust(minion->entity.position);
+
+    if (!minion->isPlayer) enemyMinionCount++;
 
     return id;
 }
@@ -846,7 +887,7 @@ const float TOWER_ATTACK_RADIUS[] = {
 const float TOWER_ATTACK_PERIOD[] = {
     0.4,
     1.8,
-    0
+    1.0
 };
 
 const float TOWER_PROJECTILE_SPEED[] = {
@@ -921,12 +962,20 @@ void updateTower(int id, float delta) {
     }
     if (tower->attackCooldown > 0) {
         tower->attackCooldown -= delta;
+        
     }
 
     else {
         
         if (tower->type == SUMMONER_TOWER_TYPE) {
-        
+            if (entityClasses[MINION_TYPE].spawnCount - enemyMinionCount > 0)
+            {
+                float radius = randRange(30.0, 50.0);
+                float angle = randRange(0, PI);
+                Vector2 spawnPosition = Vector2Add(tower->entity.position, Vector2Rotate((Vector2) { radius }, angle));
+                spawnMinionAt(spawnPosition, false);
+                tower->attackCooldown += TOWER_ATTACK_PERIOD[tower->type];
+            }
         } else {
             getMinionIdsInRange(&minionIdsInRange, &currentTileMap, tower->entity.position, TOWER_ATTACK_RADIUS[tower->type], PLAYER_ONLY);
 
@@ -934,7 +983,6 @@ void updateTower(int id, float delta) {
             int count = minionIdsInRange.used;
             int j = 0;
             for ITERATE(i, count) {
-                int i = GetRandomValue(0, minionIdsInRange.used - 1);
                 int id = minionIdsInRange.array[i];
                 Minion* minion = getEntity(MINION_TYPE, id);
 
@@ -993,7 +1041,7 @@ void onTowerDestroyed(int id) {
         1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
     );*/
 
-    if (entityClasses[TOWER_TYPE].spawnCount == 0) {
+    if (entityClasses[TOWER_TYPE].spawnCount == 0 && !levels[currentLevelNumber].isDebugLevel) {
         gotoNextLevel();
     }
 }
@@ -1007,6 +1055,8 @@ void onTowerDestroyed(int id) {
 
 int spawnProjectile(int type, Vector2 startPosition, int targetMinionId, float totalAliveTime) {
     assert(getEntity(MINION_TYPE, targetMinionId)->isSpawned);
+    assert(targetMinionId >= 0);
+    assert(targetMinionId < entityClasses[MINION_TYPE].bankSize);
 
     int id = createEntity(PROJECTILE_TYPE);
     Projectile* projectile = getEntity(PROJECTILE_TYPE, id);
@@ -1086,8 +1136,8 @@ void updateProjectile(int id, float delta) {
 }
 
 float calculateProjectileHeight(float timePercent) {
-    static const float startHeight = 40.0;
-    static const float peakHeight = 80.0; // this is not actually peak height, but I'm too lazy to make the equation better
+    static const float startHeight = 60.0;
+    static const float peakHeight = 100.0; // this is not actually peak height, but I'm too lazy to make the equation better
     static const float endHeight = 10.0;
 
     float result = -peakHeight * (timePercent - 1) * (timePercent + startHeight / peakHeight) + endHeight;
@@ -1273,6 +1323,20 @@ TileMap loadTileMap(Image* mapImage) {
                 tileData->type = GROUND_TILE;
             }
 
+            if (color.r == 0 && color.g == 0) {
+                // SPAWN SUMMONER TOWER
+                spawnTower(SUMMONER_TOWER_TYPE, position, color.b * 10);
+                tileData->type = GROUND_TILE;
+            }
+
+            if (color.g == 0xEE && color.b == 0xEE) {
+                // SPAWN ENEMY MINIONS
+                for ITERATE(i, color.r) {
+                    spawnMinionAt((Vector2) { randRange(x, x + 1)* TILE_SIZE, randRange(y, y + 1)* TILE_SIZE }, false);
+                }
+                tileData->type = GROUND_TILE;
+            }
+
             if (tileData->type == TRAP_TILE) {
                 // SPAWN TRAP
                 int id = createEntity(TRAP_TYPE);
@@ -1335,7 +1399,7 @@ void drawTileMap(TileMap* tileMap) {
             }
 
             if (DEBUG_MODE) {
-                char str[8];
+                char str[16];
                 sprintf(str, "%d/%d", tile->minionIds.used, tile->minionIds.size);
                 DrawText(str, tileBounds.x, tileBounds.y, 10, BLACK);
             }
@@ -1354,7 +1418,9 @@ void destroyTileMap(TileMap* tileMap) {
 }
 
 TileData* getTileAt(TileMap* tileMap, Vector2 position) {
-    return getTile(tileMap, position.x / TILE_SIZE, position.y / TILE_SIZE);
+    if (position.x >= 0 && position.y >= 0)
+        return getTile(tileMap, position.x / TILE_SIZE, position.y / TILE_SIZE);
+    return NULL;
 }
 
 
@@ -1365,52 +1431,57 @@ TileData* getTileAt(TileMap* tileMap, Vector2 position) {
 
 
 
-#define LEVEL_COUNT 8
-Level levels[LEVEL_COUNT];
-int currentLevelNumber = 0;
-int pendingLevelNumber = -1;
-float levelStartTime = 0.0;
+
+
 
 void initLevels() {
-    levels[0] = (Level){ 
-        .imagePath = "Images/Maps/Level0.png", 
-        .startingMinionCount = 100, 
-        .description = "Click and Drag on the Blue Region"
+    levels[0] = (Level){
+        .imagePath = "Images/Maps/Level0.png",
+        .startingMinionCount = 100,
+        .description = "Click and Drag on the Blue Region",
+        .isDebugLevel = false
     };
     levels[1] = (Level){ 
         .imagePath = "Images/Maps/Level1.png", 
         .startingMinionCount = 40,
-        .description = "Choose Wisely"
+        .description = "Choose Wisely",
+        .isDebugLevel = false
     };
     levels[2] = (Level){
         .imagePath = "Images/Maps/Level2.png",
-        .startingMinionCount = 100,
-        .description = "Watch out!"
+        .startingMinionCount = 70,
+        .description = "Watch out!",
+        .isDebugLevel = false
     };
     levels[3] = (Level){
         .imagePath = "Images/Maps/Level3.png",
         .startingMinionCount = 80,
-        .description = "Double Trouble"
+        .description = "Double Trouble",
+        .isDebugLevel = false
     };
     levels[4] = (Level){
-        .imagePath = "Images/Maps/TestLevel.png",
-        .startingMinionCount = 1000,
-        .description = "Choose Wisely"
+        .imagePath = "Images/Maps/Level4.png",
+        .startingMinionCount = 120,
+        .description = "You and what army?",
+        .isDebugLevel = false
     };
     levels[5] = (Level){
-        .imagePath = "Images/Maps/TestLevel.png",
-        .startingMinionCount = 1000,
-        .description = "Choose Wisely"
+        .imagePath = "Images/Maps/Level5.png",
+        .startingMinionCount = 70,
+        .description = "I Summon Thee!",
+        .isDebugLevel = false
     };
     levels[6] = (Level){
-        .imagePath = "Images/Maps/TestLevel.png",
-        .startingMinionCount = 1000,
-        .description = "Choose Wisely"
+        .imagePath = "Images/Maps/Level6.png",
+        .startingMinionCount = 100,
+        .description = "The Final Challenge",
+        .isDebugLevel = false
     };
     levels[7] = (Level){
-        .imagePath = "Images/Maps/TestLevel.png",
+        .imagePath = "Images/Maps/Freeplay.png",
         .startingMinionCount = 1000,
-        .description = "Choose Wisely"
+        .description = "Freeplay (Num Keys to Spawn)",
+        .isDebugLevel = true
     };
 }
 
@@ -1421,12 +1492,14 @@ void reloadLevel() {
 }
 
 void gotoNextLevel() {
+    if (currentLevelNumber + 1 >= LEVEL_COUNT) return;
     LEVEL_TRANSITION_TIME_MAX = 3.0;
     levelTransitionTime = LEVEL_TRANSITION_TIME_MAX;
     pendingLevelNumber = max(0, currentLevelNumber + 1);
 }
 
 void gotoPreviousLevel() {
+    if (currentLevelNumber - 1 < 0) return;
     LEVEL_TRANSITION_TIME_MAX = 1.0;
     levelTransitionTime = LEVEL_TRANSITION_TIME_MAX;
     pendingLevelNumber = min(currentLevelNumber - 1, LEVEL_COUNT - 1);
@@ -1435,6 +1508,7 @@ void gotoPreviousLevel() {
 void loadLevel(Level* level) {
 
     levelStartTime = GetTime();
+    enemyMinionCount = 0;
 
     // Reset classes
     for ITERATE(type, TYPE_COUNT) {
@@ -1458,6 +1532,8 @@ void loadLevel(Level* level) {
     minionInventoryCount = level->startingMinionCount;
     timeSinceLastInventoryIncrease = GetTime();
     timeSinceLastInventoryDecrease = GetTime();
+    hasPlacedMinion = false;
+   
 
     camera.zoom = 0.5;
     setCameraCenter(&camera, (Vector2) {
@@ -1479,6 +1555,8 @@ int main(void) {
 
     InitWindow(SCREEN_SIZE.x, SCREEN_SIZE.y, "raylib [core] example - basic window");
 
+    
+
     SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
@@ -1496,6 +1574,13 @@ int main(void) {
     loadSprites();
     loadFonts();
 
+    {
+        SetWindowTitle("Too Many Minions");
+        Image iconImg = LoadImageFromTexture(ICON_SPRITE);
+        SetWindowIcon(iconImg);
+        UnloadImage(iconImg);
+    }
+
     loadLevel(&levels[currentLevelNumber]);
     // Main game loop
     while (!WindowShouldClose())    // Detect window close button or ESC key
@@ -1507,7 +1592,7 @@ int main(void) {
         
         float delta = GetFrameTime();
 
-        if (entityClasses[MINION_TYPE].spawnCount == 0 && minionInventoryCount == 0 && pendingLevelNumber == NULLID) {
+        if (entityClasses[MINION_TYPE].spawnCount - enemyMinionCount == 0 && minionInventoryCount == 0 && pendingLevelNumber == NULLID) {
             reloadLevel();
         }
 
@@ -1542,7 +1627,10 @@ int main(void) {
         Vector2 mouseWorldPosition = GetScreenToWorld2D(GetMousePosition(), camera);
 
         TileData* tileAtMouse = getTileAt(&currentTileMap, mouseWorldPosition);
-        bool canSpawn = minionInventoryCount > 0 && tileAtMouse != NULL && tileAtMouse->type == PLACEABLE_TILE;
+
+        bool hasDebugControl = DEBUG_MODE || levels[currentLevelNumber].isDebugLevel;
+        bool canSpawnDebug = tileAtMouse != NULL;
+        bool canSpawn = minionInventoryCount > 0 && canSpawnDebug && tileAtMouse->type == PLACEABLE_TILE;
 
         if (
             canSpawn
@@ -1552,13 +1640,42 @@ int main(void) {
             lastSpawnPoint = spawnPoint;
             minionInventoryCount--;
             timeSinceLastInventoryDecrease = GetTime();
+            hasPlacedMinion = true;
             spawnMinionAt(spawnPoint, true);
         }
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && DEBUG_MODE)
-        {
-            //spawnTower(BOMB_TOWER_TYPE, mouseWorldPosition, 100);
-            spawnMinionAt(mouseWorldPosition, false);
+        if (
+            canSpawnDebug && hasDebugControl
+            && (IsKeyPressed(KEY_FIVE)
+                || (IsKeyDown(KEY_FIVE) && Vector2Distance(mouseWorldPosition, lastSpawnPoint) >= spawnDeltaDis))) {
+            Vector2 spawnPoint = mouseWorldPosition;
+            lastSpawnPoint = spawnPoint;
+            spawnMinionAt(spawnPoint, false);
+        }
+
+        if (IsKeyPressed(KEY_ONE) && hasDebugControl && canSpawnDebug) {
+            spawnTower(ARCHER_TOWER_TYPE, mouseWorldPosition, 50);
+        }
+
+        if (IsKeyPressed(KEY_TWO) && hasDebugControl && canSpawnDebug) {
+            spawnTower(BOMB_TOWER_TYPE, mouseWorldPosition, 50);
+        }
+
+        if (IsKeyPressed(KEY_THREE) && hasDebugControl && canSpawnDebug) {
+            spawnTower(SUMMONER_TOWER_TYPE, mouseWorldPosition, 50);
+        }
+
+        if (IsKeyPressed(KEY_FOUR) && hasDebugControl && canSpawnDebug) {
+            int id = createEntity(TRAP_TYPE);
+            getEntity(TRAP_TYPE, id)->position = mouseWorldPosition;
+        }
+
+        if (IsKeyDown(KEY_SIX) && hasDebugControl && canSpawnDebug) {
+            getTileAt(&currentTileMap, mouseWorldPosition)->type = PLACEABLE_TILE;
+        }
+
+        if (IsKeyDown(KEY_SEVEN) && hasDebugControl && canSpawnDebug) {
+            getTileAt(&currentTileMap, mouseWorldPosition)->type = GROUND_TILE;
         }
 
         // Update Entities
@@ -1623,7 +1740,7 @@ int main(void) {
 
 
         // Main Draw
-
+        printf("%d\n", enemyMinionCount);
         
         allEntities.used = 0;
 
@@ -1667,18 +1784,22 @@ int main(void) {
         
         // Gui
         
-
+        float  fontScale = 1.0;
+        if (GetTime() - levelStartTime < 0.5)
+            fontScale = getSquashScale(GetTime() - levelStartTime, 1.3).y;
        
-        drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, 10 }, (Vector2) { 0.5, 0 }, MAIN_FONT, levels[currentLevelNumber].description,  64 * camera.zoom, 0, WHITE);
+        drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, 30 }, (Vector2) { 0.5, 0.5 }, MAIN_FONT, levels[currentLevelNumber].description, fontScale * 64 * camera.zoom, 0, WHITE);
         
 
-        float fontScale = getSquashScale(GetTime() - timeSinceLastInventoryIncrease, 1.5).y * getSquashScale(GetTime() - timeSinceLastInventoryDecrease, 1.0).y;
+        fontScale = getSquashScale(GetTime() - timeSinceLastInventoryIncrease, 1.5).y * getSquashScale(GetTime() - timeSinceLastInventoryDecrease, 1.0).y;
         
         
         char str[8];
         sprintf(str, "%d", minionInventoryCount);
         drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, SCREEN_SIZE.y - 10 }, (Vector2) { 0.5, 1.0 }, MAIN_FONT, str, fontScale * 128 * camera.zoom, 0, WHITE);
 
+        char* controlsString = "R to Reset \nM to Skip \nN to Go Back";
+        drawTextAnchored((Vector2) { 10, SCREEN_SIZE.y - 35 }, (Vector2) { 0.0, 1.0 }, MAIN_FONT, controlsString, 32 * camera.zoom, 0, WHITE);
         //DrawFPS(10, 10);
 
         EndDrawing();
