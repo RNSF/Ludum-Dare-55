@@ -61,6 +61,9 @@ void freeIntArray(IntArray * a) {
 
 
 
+
+
+
 // Min Max
 inline int imin(int i1, int i2) {
     return i1 < i2 ? i1 : i2;
@@ -245,6 +248,10 @@ typedef struct Level {
     int startingMinionCount;
 } Level;
 
+typedef struct GlobalId {
+    int type;
+    int id;
+} GlobalId;
 
 
 #define MINION_TYPE 0
@@ -282,6 +289,7 @@ void loadNextLevel();
 void reloadLevel();
 void resetClass(int type);
 void loadPreviousLevel();
+void quickSortGlobalId(GlobalId arr[], int low, int high);
 
 
 //------------------------------------------------------------------------------------
@@ -347,8 +355,10 @@ void destroyClass(int type) {
 // C Entity
 //------------------------------------------------------------------------------------
 
+
+
 Entity* getEntity(int type, int id) {
-    return ((intptr_t)entityClasses[type].bank + id * entityClasses[type].structSize);;
+    return ((intptr_t)entityClasses[type].bank + id * entityClasses[type].structSize);
 }
 
 
@@ -377,6 +387,88 @@ void destroyEntity(int type, int id) {
     entityClasses[type].destroyCallback(id);
 }
 
+//------------------------------------------------------------------------------------
+// C GlobalIdArray
+//------------------------------------------------------------------------------------
+
+
+typedef struct GlobalIdArray {
+    GlobalId* array;
+    size_t used;
+    size_t size;
+} GlobalIdArray;
+
+
+void initGlobalIdArray(GlobalIdArray* a, size_t initialSize) {
+    a->array = malloc(initialSize * sizeof(GlobalId));
+    a->used = 0;
+    a->size = initialSize;
+}
+
+void insertGlobalIdArray(GlobalIdArray* a, GlobalId element) {
+    if (a->used == a->size) {
+        a->size *= 2;
+        a->array = realloc(a->array, a->size * sizeof(GlobalId));
+    }
+    a->array[a->used++] = element;
+}
+
+void freeGlobalIdArray(GlobalIdArray* a) {
+    free(a->array);
+    a->array = NULL;
+    a->used = a->size = 0;
+}
+
+
+
+
+// QUICK SORT
+// from https://www.geeksforgeeks.org/quick-sort-in-c/
+void swapGlobalId(GlobalId* a, GlobalId* b)
+{
+    GlobalId temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+int partitionGlobalId(GlobalId* arr, int low, int high)
+{
+    GlobalId pivot = arr[low];
+    int i = low;
+    int j = high;
+
+    while (i < j) {
+
+        while (getEntity(arr[i].type, arr[i].id)->position.y <= getEntity(pivot.type, pivot.id)->position.y && i <= high - 1) {
+            i++;
+        }
+        while (getEntity(arr[j].type, arr[j].id)->position.y > getEntity(pivot.type, pivot.id)->position.y && j >= low + 1) {
+            j--;
+        }
+        if (i < j) {
+            swapGlobalId(&arr[i], &arr[j]);
+        }
+    }
+    swapGlobalId(&arr[low], &arr[j]);
+    return j;
+}
+
+
+void quickSortGlobalId(GlobalId* arr, int low, int high)
+{
+    if (low < high) {
+        int partitionIndex = partitionGlobalId(arr, low, high);
+        quickSortGlobalId(arr, low, partitionIndex - 1);
+        quickSortGlobalId(arr, partitionIndex + 1, high);
+    }
+}
+
+void sortGlobalIdArrayByDepth(GlobalIdArray* a) {
+    quickSortGlobalId(a->array, 0, a->used - 1);
+}
+
+
+
 
 //------------------------------------------------------------------------------------
 // C Vars
@@ -389,6 +481,7 @@ bool isMinionTargetRecalculationPending;
 int minionInventoryCount;
 TileMap currentTileMap;
 IntArray minionIdsInRange;
+GlobalIdArray allEntities;
 
 const int spawnDeltaDis = 10;
 Vector2 lastSpawnPoint;
@@ -453,7 +546,7 @@ void drawMinion(int id) {
     Vector2 p2 = p;
     p2.y -= abs(sin(minion->entity.lifeTime * 10) * 7);
 
-    drawSpriteAnchored(MINION_SHADOW_SPRITE, p, 0, (Vector2) { 0.5, 0.5 }, WHITE);
+    
     drawSpriteAnchored(PLAYER_MINION_SPRITE, p2, 0, (Vector2) { 0.5, 1.0 }, GetColor(PLAYER_COLOR));
     
 }
@@ -562,7 +655,7 @@ int spawnTower(Vector2 position, float health) {
 void drawTower(int id) {
     Tower* tower = getEntity(TOWER_TYPE, id);
     
-    drawSpriteAnchored(TOWER_SHADOW_SPRITE, tower->entity.position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
+    
     drawSpriteAnchored(ARCHER_TOWER_SPRITE, tower->entity.position, 0, (Vector2) { 0.5, 1.0 }, GetColor(ENEMY_COLOR));
     
 
@@ -867,7 +960,10 @@ void loadLevel(Level* level) {
 
     // Reset Array
     freeIntArray(&minionIdsInRange);
-    initIntArray(&minionIdsInRange, 100);
+    initIntArray(&minionIdsInRange, 128);
+
+    freeGlobalIdArray(&allEntities);
+    initGlobalIdArray(&allEntities, 128);
 
     // Reset Values
     isMinionTargetRecalculationPending = false;
@@ -903,6 +999,9 @@ int main(void) {
         initClass(type);
     }
     
+    initIntArray(&minionIdsInRange, 128);
+    initGlobalIdArray(&allEntities, 128);
+
     initLevels();
     
 
@@ -988,13 +1087,45 @@ int main(void) {
 
         drawTileMap(&currentTileMap);
 
+        // Shadows
+        for ITERATE(id, entityClasses[MINION_TYPE].bankSize) {
+            Entity* entity = getEntity(MINION_TYPE, id);
+            if (!entity->isSpawned) continue;
+            drawSpriteAnchored(MINION_SHADOW_SPRITE, entity->position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
+        }
+
+        for ITERATE(id, entityClasses[TOWER_TYPE].bankSize) {
+            Entity* entity = getEntity(TOWER_TYPE, id);
+            if (!entity->isSpawned) continue;
+            drawSpriteAnchored(TOWER_SHADOW_SPRITE, entity->position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
+        }
+
+
+        // Main Draw
+
+        
+        allEntities.used = 0;
+
         for ITERATE(type, TYPE_COUNT) {
             EntityClass* entityClass = &entityClasses[type];
             for ITERATE(id, entityClass->bankSize) {
                 Entity* entity = getEntity(type, id);
                 if (!entity->isSpawned) continue;
-                entityClass->draw(id);
+
+                //entityClass->draw(id);
+                insertGlobalIdArray(&allEntities, (GlobalId){type, id});
             }
+        }
+        sortGlobalIdArrayByDepth(&allEntities);
+
+        for ITERATE(i, allEntities.used) {
+            GlobalId globalId = allEntities.array[i];
+            int type = globalId.type;
+            int id = globalId.id;
+
+            Entity* entity = getEntity(type, id);
+            if (!entity->isSpawned) continue;
+            entityClasses[type].draw(id);
         }
 
         EndMode2D(camera);
@@ -1019,6 +1150,8 @@ int main(void) {
     unloadFonts();
 
     freeIntArray(&minionIdsInRange);
+    freeGlobalIdArray(&allEntities);
+
     destroyTileMap(&currentTileMap);
 
     for ITERATE(type, TYPE_COUNT) {
