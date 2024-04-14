@@ -137,14 +137,65 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="..\..\..\..\Downloads\icon.ico" />
-    <Image Include="..\..\..\..\Downloads\TestLevel.png" />
+    <Image Include="..\..\..\..\Downloads\TestLevel.png">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
+    </Image>
+    <Image Include="Images\Entities\Arrow.png" />
+    <Image Include="Images\Entities\Bomb.png" />
+    <Image Include="Images\Entities\BrickParticle.png" />
+    <Image Include="Images\Entities\DustParticle.png" />
+    <Image Include="Images\Entities\EnemyMinion.png" />
+    <Image Include="Images\Entities\FlashParticle.png" />
+    <Image Include="Images\Entities\MinionShadow.png" />
+    <Image Include="Images\Entities\ParticleFlash.png" />
+    <Image Include="Images\Entities\PlayerMinion.png" />
+    <Image Include="Images\Entities\Tower0.png" />
+    <Image Include="Images\Entities\Tower1.png" />
+    <Image Include="Images\Entities\Tower2.png" />
+    <Image Include="Images\Entities\TowerShadow.png" />
+    <Image Include="Images\Entities\Trap.png" />
+    <Image Include="Images\Entities\TrapShadow.png" />
+    <Image Include="Images\Maps\Freeplay.png" />
+    <Image Include="Images\Maps\Level0.png" />
+    <Image Include="Images\Maps\Level1.png" />
+    <Image Include="Images\Maps\Level2.png" />
+    <Image Include="Images\Maps\Level3.png" />
+    <Image Include="Images\Maps\Level4.png" />
+    <Image Include="Images\Maps\Level5.png" />
+    <Image Include="Images\Maps\Level6.png" />
+    <Image Include="Images\Maps\TestLevel.png" />
+    <Image Include="Images\Maps\TrapTest.png" />
     <Image Include="Images\UI\Icon.png" />
+    <Image Include="Images\UI\Title.png" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Ludum-Dare-55.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Font Include="Fonts\LilitaOne-Regular.ttf" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="Fonts\OFL.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Media Include="Sounds\Explosion.wav">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Copy Always</ExcludedFromBuild>
+    </Media>
+    <Media Include="Sounds\GainMoreMinions.wav" />
+    <Media Include="Sounds\LaunchArrow.wav" />
+    <Media Include="Sounds\LaunchBomb.wav" />
+    <Media Include="Sounds\Lose.wav" />
+    <Media Include="Sounds\MinionDie.wav" />
+    <Media Include="Sounds\MinionWalk.wav" />
+    <Media Include="Sounds\Place.wav" />
+    <Media Include="Sounds\TowerDestroy.wav" />
+    <Media Include="Sounds\TowerHurt.wav" />
+    <Media Include="Sounds\Win.wav" />
+    <Media Include="Sounds\Win2.wav" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

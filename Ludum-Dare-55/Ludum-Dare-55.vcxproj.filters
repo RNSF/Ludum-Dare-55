@@ -35,6 +35,84 @@
     <Image Include="Images\UI\Icon.png">
       <Filter>Resource Files</Filter>
     </Image>
+    <Image Include="Images\Entities\Arrow.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\Bomb.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\BrickParticle.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\DustParticle.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\EnemyMinion.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\FlashParticle.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\MinionShadow.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\ParticleFlash.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\PlayerMinion.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\Tower0.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\Tower1.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\Tower2.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\TowerShadow.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\Trap.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Entities\TrapShadow.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\Freeplay.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\Level0.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\Level1.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\Level2.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\Level3.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\Level4.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\Level5.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\Level6.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\TestLevel.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\Maps\TrapTest.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Images\UI\Title.png">
+      <Filter>Resource Files</Filter>
+    </Image>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h">
@@ -45,5 +123,49 @@
     <ResourceCompile Include="Ludum-Dare-55.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Font Include="Fonts\LilitaOne-Regular.ttf" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="Fonts\OFL.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Media Include="Sounds\Explosion.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\GainMoreMinions.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\LaunchArrow.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\LaunchBomb.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\Lose.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\MinionDie.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\MinionWalk.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\Place.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\TowerDestroy.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\TowerHurt.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\Win.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
+    <Media Include="Sounds\Win2.wav">
+      <Filter>Resource Files</Filter>
+    </Media>
   </ItemGroup>
 </Project>

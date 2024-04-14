@@ -13,6 +13,12 @@
 // C Macros
 //------------------------------------------------------------------------------------
 
+#ifndef _DEBUG
+
+#pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")
+
+#endif
+
 #define DEBUG_MODE false
 #define NULLID -1
 #define foreach(item, array) \
@@ -136,12 +142,23 @@ void drawTextAnchored(Vector2 position, Vector2 anchor, Font font, const char* t
 //------------------------------------------------------------------------------------
 
 Camera2D camera;
+float shakeIntensity = 0.0;
+float shakeTime = 0.0;
+Vector2 shakeOffset = {0, 0};
+Vector2 cameraCenter = { 0, 0 };
 
 void setCameraCenter(Camera2D* c, Vector2 center) {
-
-    c->offset = Vector2Subtract((Vector2){ GetScreenWidth()  / 2, GetScreenHeight() / 2}, Vector2Scale(center, c->zoom));
+    cameraCenter = center;
 }
 
+void shakeCamera(float newIntensity, float newTime) {
+    if (newIntensity >= shakeIntensity) {
+        shakeIntensity = newIntensity;
+        if (newTime >= shakeTime) {
+            shakeTime = newTime;
+        }
+    }
+}
 
 //------------------------------------------------------------------------------------
 // C Sprites
@@ -202,6 +219,91 @@ void unloadSprites() {
     UnloadTexture(TITLE_SPRITE);
     UnloadTexture(ICON_SPRITE);
 }
+
+
+//------------------------------------------------------------------------------------
+// C Sounds
+//------------------------------------------------------------------------------------
+
+
+Sound LOSE_SOUND;
+Sound WIN_SOUND;
+Sound TOWER_DESTROY_SOUND;
+Sound GAIN_MINIONS_SOUND;
+Sound PLACE_SOUND;
+Sound WIN_SOUND_2;
+Sound EXPLOSION_SOUND;
+Sound MINION_WALK_SOUND;
+Sound TOWER_HURT_SOUND;
+Sound LAUNCH_ARROW_SOUND;
+Sound LAUNCH_BOMB_SOUND;
+Sound MINION_HURT_SOUND;
+
+#define SOUND_INSTANCE_COUNT 1000
+
+Sound soundInstances[SOUND_INSTANCE_COUNT];
+
+float placeSoundCooldown = 0.0;
+
+bool playSoundInstance(Sound sound, float volume, float pitch) {
+    static lastPlayedSoundInt = 0;
+    for (int i = (lastPlayedSoundInt + 1) % SOUND_INSTANCE_COUNT;
+        i != lastPlayedSoundInt; i = (i + 1) % SOUND_INSTANCE_COUNT)
+    {
+        assert(i >= 0);
+        assert(i < SOUND_INSTANCE_COUNT);
+        Sound currentSound = soundInstances[i];
+        if (!IsSoundPlaying(currentSound))
+        {
+            UnloadSoundAlias(currentSound);
+            soundInstances[i] = LoadSoundAlias(sound);
+            SetSoundVolume(soundInstances[i], volume);
+            SetSoundPitch(soundInstances[i], pitch);
+            PlaySound(soundInstances[i]);
+            lastPlayedSoundInt = i;
+            return true;
+        }
+        
+    }
+    return false;
+}
+
+void loadSounds() {
+    LOSE_SOUND = LoadSound("Sounds/Lose.wav");
+    WIN_SOUND = LoadSound("Sounds/Win.wav");
+    TOWER_DESTROY_SOUND = LoadSound("Sounds/TowerDestroy.wav");
+    GAIN_MINIONS_SOUND = LoadSound("Sounds/GainMoreMinions.wav");
+    PLACE_SOUND = LoadSound("Sounds/Place.wav");
+    WIN_SOUND_2 = LoadSound("Sounds/Win2.wav");
+    EXPLOSION_SOUND = LoadSound("Sounds/Explosion.wav");
+    MINION_WALK_SOUND = LoadSound("Sounds/MinionWalk.wav");
+    TOWER_HURT_SOUND = LoadSound("Sounds/TowerHurt.wav");
+    LAUNCH_ARROW_SOUND = LoadSound("Sounds/LaunchArrow.wav");
+    LAUNCH_BOMB_SOUND = LoadSound("Sounds/LaunchBomb.wav");
+    MINION_HURT_SOUND = LoadSound("Sounds/MinionDie.wav");
+
+    for ITERATE(i, SOUND_INSTANCE_COUNT) {
+        soundInstances[i] = LoadSoundAlias(LOSE_SOUND);
+    }
+}
+
+void unloadSounds() {
+    UnloadSound(LOSE_SOUND);
+    UnloadSound(WIN_SOUND);
+    UnloadSound(TOWER_DESTROY_SOUND);
+    UnloadSound(GAIN_MINIONS_SOUND);
+    UnloadSound(PLACE_SOUND);
+    UnloadSound(WIN_SOUND_2);
+    UnloadSound(EXPLOSION_SOUND);
+    UnloadSound(MINION_WALK_SOUND);
+    UnloadSound(TOWER_HURT_SOUND);
+
+    for ITERATE(i, SOUND_INSTANCE_COUNT) {
+        UnloadSoundAlias(soundInstances[i]);
+    }
+}
+
+
 
 
 //------------------------------------------------------------------------------------
@@ -279,6 +381,7 @@ typedef struct Tower {
     int value;
     float attackCooldown;
     float lastHitAt;
+    float lastShot;
 } Tower;
 
 typedef struct Projectile {
@@ -631,6 +734,7 @@ float LEVEL_TRANSITION_TIME_MAX = 1.0;
 float levelTransitionTime = 0.0;
 int enemyMinionCount;
 bool hasPlacedMinion;
+bool inMenu = true;;
 
 const int spawnDeltaDis = 10;
 Vector2 lastSpawnPoint;
@@ -760,6 +864,8 @@ void updateMinion(int id, float delta) {
         } else {
             destroyEntity(MINION_TYPE, minion->targetId);
         }
+        playSoundInstance(MINION_HURT_SOUND, 0.5, randRange(0.9, 1.1));
+        shakeCamera(1.0, 0.1);
         destroyEntity(MINION_TYPE, id);
         return;
     }
@@ -774,7 +880,14 @@ void drawMinion(int id) {
     Vector2 p = minion->entity.position;
     //DrawRectangle(p.x - 5, p.y - 5, 10, 10, RED);
     Vector2 p2 = p;
-    p2.y -= abs(sin(minion->entity.lifeTime * 10) * 7);
+    float oldNotAbs = minion->entity.height;
+    float notAbs = sin(minion->entity.lifeTime * 10) * 7;
+    minion->entity.height = notAbs; // very hacky
+    /*if ((oldNotAbs > 0 && notAbs <= 0) || (oldNotAbs <= 0 && notAbs > 0)) {
+        playSoundInstance(MINION_WALK_SOUND);
+    }*/
+
+    p2.y -= abs(notAbs);
     Texture2D* sprite = minion->isPlayer ? &PLAYER_MINION_SPRITE : &ENEMY_MINION_SPRITE;
     Color color = minion->isPlayer ? GetColor(PLAYER_COLOR) : GetColor(ENEMY_COLOR);
 
@@ -790,6 +903,7 @@ void drawMinion(int id) {
 
 
 void onMinionDestroyed(int id) {
+    
     Minion* minion = getEntity(MINION_TYPE, id);
     if (!minion->isPlayer) enemyMinionCount--;
     particleKickDust(minion->entity.position);
@@ -833,6 +947,7 @@ int spawnMinionAt(Vector2 position, bool isPlayer) {
     minion->isPlayer = isPlayer;
     minion->isProjectileTargeted = false;
     minion->isMinionTargeted = false;
+    minion->entity.height = 0;
 
     particleKickDust(minion->entity.position);
 
@@ -912,6 +1027,7 @@ int spawnTower(int type, Vector2 position, float health) {
     tower->value = health * 2;
     tower->attackCooldown = TOWER_ATTACK_PERIOD[type];
     tower->lastHitAt = 0.0;
+    tower->lastShot = 0.0;
 
     isMinionTargetRecalculationPending = true;
 
@@ -928,8 +1044,8 @@ void drawTower(int id) {
         case SUMMONER_TOWER_TYPE: sprite = &SUMMONER_TOWER_SPRITE; break;
     }
     
-
-    Vector2 scale = getSquashScale(tower->entity.lifeTime - tower->lastHitAt, 1.0);
+    
+    Vector2 scale = Vector2Multiply(getSquashScale(tower->entity.lifeTime - tower->lastHitAt, 0.98), getSquashScale(tower->entity.lifeTime - tower->lastShot, 0.98));
     drawSpriteAnchoredScaled(*sprite, tower->entity.position, 0, scale, (Vector2) { 0.5, 1.0 }, GetColor(ENEMY_COLOR));
     
 
@@ -948,6 +1064,7 @@ void damageTower(int id, int damageAmount) {
     Tower* tower = getEntity(TOWER_TYPE, id);
     tower->health -= damageAmount;
     tower->lastHitAt = tower->entity.lifeTime;
+    playSoundInstance(TOWER_HURT_SOUND, 0.8, 1.0);
 }
 
 
@@ -975,6 +1092,7 @@ void updateTower(int id, float delta) {
                 Vector2 spawnPosition = Vector2Add(tower->entity.position, Vector2Rotate((Vector2) { radius }, angle));
                 spawnMinionAt(spawnPosition, false);
                 tower->attackCooldown += TOWER_ATTACK_PERIOD[tower->type];
+                tower->lastShot = tower->entity.lifeTime;
             }
         } else {
             getMinionIdsInRange(&minionIdsInRange, &currentTileMap, tower->entity.position, TOWER_ATTACK_RADIUS[tower->type], PLAYER_ONLY);
@@ -1003,6 +1121,7 @@ void updateTower(int id, float delta) {
                 int projectileType = tower->type == ARCHER_TOWER_TYPE ? ARROW_PROJECTILE_TYPE : BOMB_PROJECTILE_TYPE;
                 spawnProjectile(projectileType, tower->entity.position, id, max(attackTime, 0.1));
                 tower->attackCooldown += TOWER_ATTACK_PERIOD[tower->type];
+                tower->lastShot = tower->entity.lifeTime;
             }
         }
     }
@@ -1041,8 +1160,19 @@ void onTowerDestroyed(int id) {
         1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
     );*/
 
+    shakeCamera(3.5, 0.3);
+
+    playSoundInstance(TOWER_DESTROY_SOUND, 1.0, 1.0);
+    
+
     if (entityClasses[TOWER_TYPE].spawnCount == 0 && !levels[currentLevelNumber].isDebugLevel) {
         gotoNextLevel();
+        
+        playSoundInstance(WIN_SOUND_2, 1.0, 1.0);
+        if (currentLevelNumber == LEVEL_COUNT - 1)
+            playSoundInstance(WIN_SOUND, 1.0, 1.0);
+    } else {
+        playSoundInstance(GAIN_MINIONS_SOUND, 1.0, 1.0);
     }
 }
 
@@ -1072,6 +1202,12 @@ int spawnProjectile(int type, Vector2 startPosition, int targetMinionId, float t
     projectile->totalAliveTime = totalAliveTime;
     projectile->entity.position = startPosition;
     projectile->entity.height = calculateProjectileHeight(0);
+
+    if (projectile->type == BOMB_PROJECTILE_TYPE)
+        playSoundInstance(LAUNCH_BOMB_SOUND, 0.5, randRange(0.9, 1.1));
+    else
+        playSoundInstance(LAUNCH_ARROW_SOUND, 0.5, randRange(0.9, 1.1));
+
     return id;
 }
 
@@ -1117,6 +1253,8 @@ void updateProjectile(int id, float delta) {
                 break;
                 
         }
+        playSoundInstance(MINION_HURT_SOUND, 1.0, randRange(0.9, 1.1));
+        shakeCamera(1.0, 0.1);
         return destroyEntity(PROJECTILE_TYPE, id);
         
     }
@@ -1253,8 +1391,10 @@ void onParticleDestroyed(int id) {
 
 int explodeAt(Vector2 position, float radius) {
     getMinionIdsInRange(&minionIdsInRange, &currentTileMap, position, radius, BOTH);
+    playSoundInstance(EXPLOSION_SOUND, 1.0, randRange(0.9, 1.1));
+    shakeCamera(6.0, 0.3);
 
-    printf("%d\n", minionIdsInRange.used);
+    //printf("%d\n", minionIdsInRange.used);
     for ITERATE(i, minionIdsInRange.used) {
         int id = minionIdsInRange.array[i];
         destroyEntity(MINION_TYPE, id);
@@ -1486,7 +1626,7 @@ void initLevels() {
 }
 
 void reloadLevel() {
-    LEVEL_TRANSITION_TIME_MAX = 1.0;
+    LEVEL_TRANSITION_TIME_MAX = 1.5;
     levelTransitionTime = LEVEL_TRANSITION_TIME_MAX;
     pendingLevelNumber = currentLevelNumber;
 }
@@ -1554,7 +1694,7 @@ int main(void) {
     //--------------------------------------------------------------------------------------
 
     InitWindow(SCREEN_SIZE.x, SCREEN_SIZE.y, "raylib [core] example - basic window");
-
+    InitAudioDevice();
     
 
     SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
@@ -1572,6 +1712,7 @@ int main(void) {
     worldRenderTexture = LoadRenderTexture(SCREEN_SIZE.x, SCREEN_SIZE.y);
 
     loadSprites();
+    loadSounds();
     loadFonts();
 
     {
@@ -1590,108 +1731,139 @@ int main(void) {
         // TODO: Update your variables here
         //----------------------------------------------------------------------------------
         
+
         float delta = GetFrameTime();
 
-        if (entityClasses[MINION_TYPE].spawnCount - enemyMinionCount == 0 && minionInventoryCount == 0 && pendingLevelNumber == NULLID) {
-            reloadLevel();
-        }
-
-        if (IsKeyPressed(KEY_R)) {
-            reloadLevel();
-            levelTransitionTime = 0.0;
-        }
-        if (IsKeyPressed(KEY_M)) {
-            gotoNextLevel();
-            levelTransitionTime = 0.0;
-        }
-        if (IsKeyPressed(KEY_N)) {
-            gotoPreviousLevel();
-            levelTransitionTime = 0.0;
-        }
-
-        
-        if (pendingLevelNumber != NULLID) {
-            levelTransitionTime -= delta;
-            if (levelTransitionTime <= 0.0)
-            {
-                currentLevelNumber = pendingLevelNumber;
-                pendingLevelNumber = NULLID;
-                loadLevel(&levels[currentLevelNumber]);
+        if (!inMenu) {
+            if (entityClasses[MINION_TYPE].spawnCount - enemyMinionCount == 0 && minionInventoryCount == 0 && pendingLevelNumber == NULLID) {
+                playSoundInstance(LOSE_SOUND, 1.0, 1.0);
+                shakeCamera(8.0, 0.5);
+                reloadLevel();
             }
-        }
+
+            if (IsKeyPressed(KEY_R)) {
+                reloadLevel();
+                levelTransitionTime = 0.0;
+            }
+            if (IsKeyPressed(KEY_M)) {
+                gotoNextLevel();
+                levelTransitionTime = 0.0;
+            }
+            if (IsKeyPressed(KEY_N)) {
+                gotoPreviousLevel();
+                levelTransitionTime = 0.0;
+            }
 
         
+            if (pendingLevelNumber != NULLID) {
+                levelTransitionTime -= delta;
+                if (levelTransitionTime <= 0.0)
+                {
+                    currentLevelNumber = pendingLevelNumber;
+                    pendingLevelNumber = NULLID;
+                    loadLevel(&levels[currentLevelNumber]);
+                }
+            }
+
         
+            placeSoundCooldown -= delta;
     
 
-        Vector2 mouseWorldPosition = GetScreenToWorld2D(GetMousePosition(), camera);
+            Vector2 mouseWorldPosition = GetScreenToWorld2D(GetMousePosition(), camera);
 
-        TileData* tileAtMouse = getTileAt(&currentTileMap, mouseWorldPosition);
+            TileData* tileAtMouse = getTileAt(&currentTileMap, mouseWorldPosition);
 
-        bool hasDebugControl = DEBUG_MODE || levels[currentLevelNumber].isDebugLevel;
-        bool canSpawnDebug = tileAtMouse != NULL;
-        bool canSpawn = minionInventoryCount > 0 && canSpawnDebug && tileAtMouse->type == PLACEABLE_TILE;
+            bool hasDebugControl = DEBUG_MODE || levels[currentLevelNumber].isDebugLevel;
+            bool canSpawnDebug = tileAtMouse != NULL;
+            bool canSpawn = minionInventoryCount > 0 && canSpawnDebug && tileAtMouse->type == PLACEABLE_TILE;
 
-        if (
-            canSpawn
-            && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)
-            || (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && Vector2Distance(mouseWorldPosition, lastSpawnPoint) >= spawnDeltaDis))) {
-            Vector2 spawnPoint = mouseWorldPosition;
-            lastSpawnPoint = spawnPoint;
-            minionInventoryCount--;
-            timeSinceLastInventoryDecrease = GetTime();
-            hasPlacedMinion = true;
-            spawnMinionAt(spawnPoint, true);
-        }
-
-        if (
-            canSpawnDebug && hasDebugControl
-            && (IsKeyPressed(KEY_FIVE)
-                || (IsKeyDown(KEY_FIVE) && Vector2Distance(mouseWorldPosition, lastSpawnPoint) >= spawnDeltaDis))) {
-            Vector2 spawnPoint = mouseWorldPosition;
-            lastSpawnPoint = spawnPoint;
-            spawnMinionAt(spawnPoint, false);
-        }
-
-        if (IsKeyPressed(KEY_ONE) && hasDebugControl && canSpawnDebug) {
-            spawnTower(ARCHER_TOWER_TYPE, mouseWorldPosition, 50);
-        }
-
-        if (IsKeyPressed(KEY_TWO) && hasDebugControl && canSpawnDebug) {
-            spawnTower(BOMB_TOWER_TYPE, mouseWorldPosition, 50);
-        }
-
-        if (IsKeyPressed(KEY_THREE) && hasDebugControl && canSpawnDebug) {
-            spawnTower(SUMMONER_TOWER_TYPE, mouseWorldPosition, 50);
-        }
-
-        if (IsKeyPressed(KEY_FOUR) && hasDebugControl && canSpawnDebug) {
-            int id = createEntity(TRAP_TYPE);
-            getEntity(TRAP_TYPE, id)->position = mouseWorldPosition;
-        }
-
-        if (IsKeyDown(KEY_SIX) && hasDebugControl && canSpawnDebug) {
-            getTileAt(&currentTileMap, mouseWorldPosition)->type = PLACEABLE_TILE;
-        }
-
-        if (IsKeyDown(KEY_SEVEN) && hasDebugControl && canSpawnDebug) {
-            getTileAt(&currentTileMap, mouseWorldPosition)->type = GROUND_TILE;
-        }
-
-        // Update Entities
-        for ITERATE(type, TYPE_COUNT) {
-            EntityClass* entityClass = &entityClasses[type];
-            for ITERATE(id, entityClass->bankSize) {
-                Entity* entity = getEntity(type, id);
-                if (!entity->isSpawned) continue;
-                entity->lifeTime += delta;
-                entityClass->update(id, delta);
+            if (
+                canSpawn
+                && (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)
+                || (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && Vector2Distance(mouseWorldPosition, lastSpawnPoint) >= spawnDeltaDis))) {
+                Vector2 spawnPoint = mouseWorldPosition;
+                lastSpawnPoint = spawnPoint;
+            
+            
+                if (spawnMinionAt(spawnPoint, true) != NULLID)
+                {
+                    playSoundInstance(MINION_WALK_SOUND, 1.0, randRange(0.9, 1.1));
+                    shakeCamera(1.0, 0.1);
+                    minionInventoryCount--;
+                    timeSinceLastInventoryDecrease = GetTime();
+                    hasPlacedMinion = true;
+                }
             }
+
+            if (
+                canSpawnDebug && hasDebugControl
+                && (IsKeyPressed(KEY_FIVE)
+                    || (IsKeyDown(KEY_FIVE) && Vector2Distance(mouseWorldPosition, lastSpawnPoint) >= spawnDeltaDis))) {
+                Vector2 spawnPoint = mouseWorldPosition;
+                lastSpawnPoint = spawnPoint;
+            
+                if(spawnMinionAt(spawnPoint, false) != NULLID)
+                {
+                    playSoundInstance(MINION_WALK_SOUND, 1.0, randRange(0.9, 1.1));
+                    shakeCamera(1.0, 0.1);
+                }
+            }
+
+            if (IsKeyPressed(KEY_ONE) && hasDebugControl && canSpawnDebug) {
+                if(spawnTower(ARCHER_TOWER_TYPE, mouseWorldPosition, 50) != NULLID)
+                    playSoundInstance(PLACE_SOUND, 1.0, randRange(0.9, 1.1));
+            
+            }
+
+            if (IsKeyPressed(KEY_TWO) && hasDebugControl && canSpawnDebug) {
+                if(spawnTower(BOMB_TOWER_TYPE, mouseWorldPosition, 50) != NULLID);
+                    playSoundInstance(PLACE_SOUND, 1.0, randRange(0.9, 1.1));
+            }
+
+            if (IsKeyPressed(KEY_THREE) && hasDebugControl && canSpawnDebug) {
+                if(spawnTower(SUMMONER_TOWER_TYPE, mouseWorldPosition, 50) != NULLID);
+                    playSoundInstance(PLACE_SOUND, 1.0, randRange(0.9, 1.1));
+            }
+
+            if (IsKeyPressed(KEY_FOUR) && hasDebugControl && canSpawnDebug) {
+                int id = createEntity(TRAP_TYPE);
+                if (id != NULLID)
+                {
+                    getEntity(TRAP_TYPE, id)->position = mouseWorldPosition;
+                    playSoundInstance(PLACE_SOUND, 1.0, randRange(0.9, 1.1));
+                }
+            }
+
+            if (IsKeyDown(KEY_SIX) && hasDebugControl && canSpawnDebug) {
+                if (getTileAt(&currentTileMap, mouseWorldPosition)->type != PLACEABLE_TILE)
+                {
+                    getTileAt(&currentTileMap, mouseWorldPosition)->type = PLACEABLE_TILE;
+                    playSoundInstance(PLACE_SOUND, 1.0, randRange(0.9, 1.1));
+                }
+            }
+
+            if (IsKeyDown(KEY_SEVEN) && hasDebugControl && canSpawnDebug) {
+                if (getTileAt(&currentTileMap, mouseWorldPosition)->type != GROUND_TILE)
+                {
+                    getTileAt(&currentTileMap, mouseWorldPosition)->type = GROUND_TILE;
+                    playSoundInstance(PLACE_SOUND, 1.0, randRange(0.9, 1.1));
+                }
+            }
+
+            // Update Entities
+            for ITERATE(type, TYPE_COUNT) {
+                EntityClass* entityClass = &entityClasses[type];
+                for ITERATE(id, entityClass->bankSize) {
+                    Entity* entity = getEntity(type, id);
+                    if (!entity->isSpawned) continue;
+                    entity->lifeTime += delta;
+                    entityClass->update(id, delta);
+                }
+            }
+
+            // Update Tilemap
+            updateTileMap(&currentTileMap);
         }
-
-        // Update Tilemap
-        updateTileMap(&currentTileMap);
-
         //printf("%d\n", entityClasses[MINION_TYPE].spawnCount);
 
         //----------------------------------------------------------------------------------
@@ -1712,98 +1884,119 @@ int main(void) {
         }
 
         // World
-                          
+        shakeTime -= delta;
+        if (shakeTime <= 0) {
+            shakeIntensity = 0;
+        }
+
+        shakeOffset = (Vector2){ randRange(-shakeIntensity, shakeIntensity), randRange(-shakeIntensity, shakeIntensity) };
+
+        camera.offset = Vector2Add(shakeOffset, Vector2Subtract((Vector2) { GetScreenWidth() / 2, GetScreenHeight() / 2 }, Vector2Scale(cameraCenter, camera.zoom)));
+
+
         BeginTextureMode(worldRenderTexture);
         ClearBackground((Color){0, 0, 0, 0});
         BeginMode2D(camera);       
+        if (!inMenu) {
+            drawTileMap(&currentTileMap);
 
-        drawTileMap(&currentTileMap);
+            // Shadows
+            for ITERATE(id, entityClasses[MINION_TYPE].bankSize) {
+                Entity* entity = getEntity(MINION_TYPE, id);
+                if (!entity->isSpawned) continue;
+                drawSpriteAnchored(MINION_SHADOW_SPRITE, entity->position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
+            }
 
-        // Shadows
-        for ITERATE(id, entityClasses[MINION_TYPE].bankSize) {
-            Entity* entity = getEntity(MINION_TYPE, id);
-            if (!entity->isSpawned) continue;
-            drawSpriteAnchored(MINION_SHADOW_SPRITE, entity->position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
-        }
+            for ITERATE(id, entityClasses[TOWER_TYPE].bankSize) {
+                Entity* entity = getEntity(TOWER_TYPE, id);
+                if (!entity->isSpawned) continue;
+                drawSpriteAnchored(TOWER_SHADOW_SPRITE, entity->position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
+            }
 
-        for ITERATE(id, entityClasses[TOWER_TYPE].bankSize) {
-            Entity* entity = getEntity(TOWER_TYPE, id);
-            if (!entity->isSpawned) continue;
-            drawSpriteAnchored(TOWER_SHADOW_SPRITE, entity->position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
-        }
-
-        for ITERATE(id, entityClasses[TRAP_TYPE].bankSize) {
-            Entity* entity = getEntity(TRAP_TYPE, id);
-            if (!entity->isSpawned) continue;
-            drawSpriteAnchored(TRAP_SHADOW_SPRITE, entity->position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
-        }
+            for ITERATE(id, entityClasses[TRAP_TYPE].bankSize) {
+                Entity* entity = getEntity(TRAP_TYPE, id);
+                if (!entity->isSpawned) continue;
+                drawSpriteAnchored(TRAP_SHADOW_SPRITE, entity->position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
+            }
 
 
-        // Main Draw
-        printf("%d\n", enemyMinionCount);
+            // Main Draw
+            //printf("%d\n", enemyMinionCount);
         
-        allEntities.used = 0;
+            allEntities.used = 0;
 
-        for ITERATE(type, TYPE_COUNT) {
-            EntityClass* entityClass = &entityClasses[type];
-            for ITERATE(id, entityClass->bankSize) {
+            for ITERATE(type, TYPE_COUNT) {
+                EntityClass* entityClass = &entityClasses[type];
+                for ITERATE(id, entityClass->bankSize) {
+                    Entity* entity = getEntity(type, id);
+                    if (!entity->isSpawned) continue;
+
+                    //entityClass->draw(id);
+                    insertGlobalIdArray(&allEntities, (GlobalId){type, id});
+                }
+            }
+            sortGlobalIdArrayByDepth(&allEntities);
+
+            for ITERATE(i, allEntities.used) {
+                GlobalId globalId = allEntities.array[i];
+                int type = globalId.type;
+                int id = globalId.id;
+
                 Entity* entity = getEntity(type, id);
                 if (!entity->isSpawned) continue;
-
-                //entityClass->draw(id);
-                insertGlobalIdArray(&allEntities, (GlobalId){type, id});
+                entityClasses[type].draw(id);
             }
         }
-        sortGlobalIdArrayByDepth(&allEntities);
-
-        for ITERATE(i, allEntities.used) {
-            GlobalId globalId = allEntities.array[i];
-            int type = globalId.type;
-            int id = globalId.id;
-
-            Entity* entity = getEntity(type, id);
-            if (!entity->isSpawned) continue;
-            entityClasses[type].draw(id);
-        }
-
         EndMode2D(camera);
         EndTextureMode();
         
-        
-        float transitionPercent = 1 - exp((levelStartTime - GetTime()) * 5);
+        if(!inMenu) {
+            float transitionPercent = 1 - exp((levelStartTime - GetTime()) * 5);
 
-        if (levelTransitionTime > 0.0)
-            transitionPercent = pow(Clamp(2 * (levelTransitionTime - 0.25), 0, 1), 5);
+            if (levelTransitionTime > 0.0)
+                transitionPercent = pow(Clamp(2 * (levelTransitionTime - 0.25), 0, 1), 5);
 
-        if (transitionPercent > 0.999) transitionPercent = 1.0;
-        float yOffset = (1 - transitionPercent) * 10;
-        DrawTextureRec(worldRenderTexture.texture, (Rectangle){ 0, yOffset, SCREEN_SIZE.x, -SCREEN_SIZE.y}, Vector2Zero(),
-            ColorLerp(GetColor(0xFFFFFF00), WHITE, transitionPercent));
+            if (transitionPercent > 0.999) transitionPercent = 1.0;
+            float yOffset = (1 - transitionPercent) * 10;
+            DrawTextureRec(worldRenderTexture.texture, (Rectangle){ 0, yOffset, SCREEN_SIZE.x, -SCREEN_SIZE.y}, Vector2Zero(),
+                ColorLerp(GetColor(0xFFFFFF00), WHITE, transitionPercent));
         
 
         
-        // Gui
+            // Gui
         
-        float  fontScale = 1.0;
-        if (GetTime() - levelStartTime < 0.5)
-            fontScale = getSquashScale(GetTime() - levelStartTime, 1.3).y;
+            float  fontScale = 1.0;
+            if (GetTime() - levelStartTime < 0.5)
+                fontScale = getSquashScale(GetTime() - levelStartTime, 1.3).y;
        
-        drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, 30 }, (Vector2) { 0.5, 0.5 }, MAIN_FONT, levels[currentLevelNumber].description, fontScale * 64 * camera.zoom, 0, WHITE);
+            drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, 30 }, (Vector2) { 0.5, 0.5 }, MAIN_FONT, levels[currentLevelNumber].description, fontScale * 64 * camera.zoom, 0, WHITE);
         
 
-        fontScale = getSquashScale(GetTime() - timeSinceLastInventoryIncrease, 1.5).y * getSquashScale(GetTime() - timeSinceLastInventoryDecrease, 1.0).y;
+            fontScale = getSquashScale(GetTime() - timeSinceLastInventoryIncrease, 1.5).y * getSquashScale(GetTime() - timeSinceLastInventoryDecrease, 1.0).y;
         
         
-        char str[8];
-        sprintf(str, "%d", minionInventoryCount);
-        drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, SCREEN_SIZE.y - 10 }, (Vector2) { 0.5, 1.0 }, MAIN_FONT, str, fontScale * 128 * camera.zoom, 0, WHITE);
+            char str[8];
+            sprintf(str, "%d", minionInventoryCount);
+            drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, SCREEN_SIZE.y - 10 }, (Vector2) { 0.5, 1.0 }, MAIN_FONT, str, fontScale * 128 * camera.zoom, 0, WHITE);
 
-        char* controlsString = "R to Reset \nM to Skip \nN to Go Back";
-        drawTextAnchored((Vector2) { 10, SCREEN_SIZE.y - 35 }, (Vector2) { 0.0, 1.0 }, MAIN_FONT, controlsString, 32 * camera.zoom, 0, WHITE);
-        //DrawFPS(10, 10);
+            char* controlsString = "R to Reset \nM to Skip \nN to Go Back";
+            drawTextAnchored((Vector2) { 10, SCREEN_SIZE.y - 35 }, (Vector2) { 0.0, 1.0 }, MAIN_FONT, controlsString, 32 * camera.zoom, 0, WHITE);
+            //DrawFPS(10, 10);
+        } else {
+            drawSpriteAnchoredScaled(TITLE_SPRITE, (Vector2) { SCREEN_SIZE.x / 2, 130 + sin(GetTime()) * 10 }, 0, (Vector2){ camera.zoom , camera.zoom
+            }, (Vector2) { 0.5, 0.5 }, WHITE);
 
+            drawSpriteAnchoredScaled(ICON_SPRITE, (Vector2) { SCREEN_SIZE.x / 2, SCREEN_SIZE.y / 2  + 50 - fabs(sin(GetTime() * 5)) * 8 }, 0, (Vector2) {
+                camera.zoom, camera.zoom
+            }, (Vector2) { 0.5, 0.5 }, WHITE);
+
+            drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, SCREEN_SIZE.y - 70 }, (Vector2) { 0.5, 1.0 }, MAIN_FONT, "Click to Start", 64 * camera.zoom, 0, ColorLerp(WHITE, GetColor(0xFFFFFF00), pow(sin(GetTime() * 2.5), 2)));
+        }
         EndDrawing();
         //----------------------------------------------------------------------------------
+
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+            inMenu = false;
     }
 
 
@@ -1812,6 +2005,7 @@ int main(void) {
     //--------------------------------------------------------------------------------------
 
     unloadSprites();
+    unloadSounds();
     unloadFonts();
 
     UnloadRenderTexture(worldRenderTexture);
@@ -1825,6 +2019,7 @@ int main(void) {
         destroyClass(type);
     }
 
+    CloseAudioDevice();
     CloseWindow();        // Close window and OpenGL context
     //--------------------------------------------------------------------------------------
 
