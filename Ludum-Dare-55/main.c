@@ -142,7 +142,7 @@ Texture2D PLAYER_MINION_SPRITE;
 Texture2D ENEMY_MINION_SPRITE;
 Texture2D ARCHER_TOWER_SPRITE;
 Texture2D BOMB_TOWER_SPRITE;
-Texture2D SUMMONING_TOWER_SPRITE;
+Texture2D SUMMONER_TOWER_SPRITE;
 Texture2D TRAP_SPRITE;
 Texture2D ARROW_SPRITE;
 Texture2D BOMB_SPRITE;
@@ -157,7 +157,7 @@ void loadSprites() {
     ENEMY_MINION_SPRITE = LoadTexture("Images/Entities/EnemyMinion.png");
     ARCHER_TOWER_SPRITE = LoadTexture("Images/Entities/Tower0.png");
     BOMB_TOWER_SPRITE = LoadTexture("Images/Entities/Tower2.png");
-    SUMMONING_TOWER_SPRITE = LoadTexture("Images/Entities/Tower1.png");
+    SUMMONER_TOWER_SPRITE = LoadTexture("Images/Entities/Tower1.png");
     TRAP_SPRITE = LoadTexture("Images/Entities/Trap.png");
     ARROW_SPRITE = LoadTexture("Images/Entities/Arrow.png");
     BOMB_SPRITE = LoadTexture("Images/Entities/Bomb.png");
@@ -173,7 +173,7 @@ void unloadSprites() {
     UnloadTexture(ENEMY_MINION_SPRITE);
     UnloadTexture(ARCHER_TOWER_SPRITE);
     UnloadTexture(BOMB_TOWER_SPRITE);
-    UnloadTexture(SUMMONING_TOWER_SPRITE);
+    UnloadTexture(SUMMONER_TOWER_SPRITE);
     UnloadTexture(TRAP_SPRITE);
     UnloadTexture(ARROW_SPRITE);
     UnloadTexture(BOMB_SPRITE);
@@ -243,6 +243,7 @@ typedef struct Minion {
 
 typedef struct Tower {
     Entity entity;
+	int type;
     int health;
     int value;
     float attackCooldown;
@@ -253,6 +254,7 @@ typedef struct Projectile {
     Vector2 startPosition;
     Vector2 targetPosition;
     int targetMinionId;
+    int type;
     float aliveTime;
     float totalAliveTime;
     float angle;
@@ -318,6 +320,12 @@ typedef struct GlobalId {
 #define PARTICLE_TYPE 4
 #define TYPE_COUNT 5
 
+#define ARROW_PROJECTILE_TYPE 0
+#define BOMB_PROJECTILE_TYPE 1
+
+#define ARCHER_TOWER_TYPE 0
+#define BOMB_TOWER_TYPE 1
+#define SUMMONER_TOWER_TYPE 2
 
 EntityClass entityClasses[TYPE_COUNT];
 
@@ -347,7 +355,7 @@ TileData* getTile(TileMap* tileMap, int x, int y);
 TileMap loadTileMap(Image* mapImage);
 TileData* getTileAt(TileMap* tileMap, Vector2 position);
 void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius);
-int spawnProjectile(Vector2 startPosition, int targetMinionId, float totalAliveTime);
+int spawnProjectile(int type, Vector2 startPosition, int targetMinionId, float totalAliveTime);
 float calculateProjectileHeight(float timePercent);
 void loadLevel(Level* level);
 void loadNextLevel();
@@ -737,21 +745,39 @@ void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, f
 // C Towers
 //------------------------------------------------------------------------------------
 
-#define TOWER_ATTACK_RADIUS 320
-#define TOWER_ATTACK_PERIOD 0.4
-#define TOWER_PROJECTILE_SPEED 320
+const float TOWER_ATTACK_RADIUS[] = {
+    320,
+    160,
+    0
+};
 
-int spawnTower(Vector2 position, float health) {
+const float TOWER_ATTACK_PERIOD[] = {
+    0.4,
+    1.5,
+    0
+};
+
+const float TOWER_PROJECTILE_SPEED[] = {
+    320,
+    320,
+    0
+};
+
+
+
+
+int spawnTower(int type, Vector2 position, float health) {
     assert(health > 0);
 
     int id = createEntity(TOWER_TYPE);
     if (id == NULLID) return;
     
     Tower* tower = getEntity(TOWER_TYPE, id);
+    tower->type = type;
     tower->health = health;
     tower->entity.position = position;
     tower->value = health * 2;
-    tower->attackCooldown = TOWER_ATTACK_PERIOD;
+    tower->attackCooldown = TOWER_ATTACK_PERIOD[type];
 
     isMinionTargetRecalculationPending = true;
 
@@ -761,8 +787,14 @@ int spawnTower(Vector2 position, float health) {
 void drawTower(int id) {
     Tower* tower = getEntity(TOWER_TYPE, id);
     
+    Texture2D* sprite = &ARCHER_TOWER_SPRITE;
+    switch(tower->type) {
+        case ARCHER_TOWER_TYPE: sprite = &ARCHER_TOWER_SPRITE; break;
+        case BOMB_TOWER_TYPE: sprite = &BOMB_TOWER_SPRITE; break;
+        case SUMMONER_TOWER_TYPE: sprite = &SUMMONER_TOWER_SPRITE; break;
+    }
     
-    drawSpriteAnchored(ARCHER_TOWER_SPRITE, tower->entity.position, 0, (Vector2) { 0.5, 1.0 }, GetColor(ENEMY_COLOR));
+    drawSpriteAnchored(*sprite, tower->entity.position, 0, (Vector2) { 0.5, 1.0 }, GetColor(ENEMY_COLOR));
     
 
     
@@ -790,13 +822,14 @@ void updateTower(int id, float delta) {
         isMinionTargetRecalculationPending = true;
         destroyEntity(TOWER_TYPE, id);
     }
+    if (tower->attackCooldown > 0) {
+        tower->attackCooldown -= delta;
+    }
 
-    tower->attackCooldown -= delta;
+    else {
+        
 
-    if (tower->attackCooldown <= 0) {
-        tower->attackCooldown += TOWER_ATTACK_PERIOD;
-
-        getMinionIdsInRange(&minionIdsInRange, &currentTileMap, tower->entity.position, TOWER_ATTACK_RADIUS);
+        getMinionIdsInRange(&minionIdsInRange, &currentTileMap, tower->entity.position, TOWER_ATTACK_RADIUS[tower->type]);
 
         // Filter to only non targted minions
         int count = minionIdsInRange.used;
@@ -818,9 +851,11 @@ void updateTower(int id, float delta) {
             int id = minionIdsInRange.array[i];
             Minion* minion = getEntity(MINION_TYPE, id);
             float distanceToMinion = Vector2Distance(tower->entity.position, minion->entity.position);
-            float attackTime = distanceToMinion / TOWER_PROJECTILE_SPEED;
+            float attackTime = distanceToMinion / TOWER_PROJECTILE_SPEED[tower->type];
             minion->isTargted = true;
-            spawnProjectile(tower->entity.position, id, max(attackTime, 0.1));
+            int projectileType = tower->type == ARCHER_TOWER_TYPE ? ARROW_PROJECTILE_TYPE : BOMB_PROJECTILE_TYPE;
+            spawnProjectile(projectileType, tower->entity.position, id, max(attackTime, 0.1));
+            tower->attackCooldown += TOWER_ATTACK_PERIOD[tower->type];
         }
     }
 
@@ -868,7 +903,9 @@ void onTowerDestroyed(int id) {
 // C Projectile
 //------------------------------------------------------------------------------------
 
-int spawnProjectile(Vector2 startPosition, int targetMinionId, float totalAliveTime) {
+#define BOMB_EXPLOSION_RADIUS 100
+
+int spawnProjectile(int type, Vector2 startPosition, int targetMinionId, float totalAliveTime) {
     assert(getEntity(MINION_TYPE, targetMinionId)->isSpawned);
 
     int id = createEntity(PROJECTILE_TYPE);
@@ -876,6 +913,7 @@ int spawnProjectile(Vector2 startPosition, int targetMinionId, float totalAliveT
 
     projectile->startPosition = startPosition;
     projectile->targetMinionId = targetMinionId;
+    projectile->type = type;
 
     Minion* targetMinion = getEntity(MINION_TYPE, targetMinionId);
 
@@ -892,7 +930,10 @@ void drawProjectile(int id) {
     Projectile* projectile = getEntity(PROJECTILE_TYPE, id);
     Vector2 drawPosition = projectile->entity.position;
     drawPosition.y -= projectile->entity.height;
-    drawSpriteAnchored(ARROW_SPRITE, drawPosition, 90 + projectile->angle * RAD2DEG, (Vector2) { 0.5, 0 }, GetColor(ENEMY_COLOR));
+    float angle = projectile->type == ARROW_PROJECTILE_TYPE ? 
+        90 + projectile->angle * RAD2DEG : projectile->angle * RAD2DEG * 0.4;
+        
+    drawSpriteAnchored(projectile->type == ARROW_PROJECTILE_TYPE ? ARROW_SPRITE : BOMB_SPRITE, drawPosition, angle, (Vector2) { 0.5, 0 }, GetColor(ENEMY_COLOR));
 }
 
 
@@ -915,10 +956,19 @@ void updateProjectile(int id, float delta) {
     float alivePercentage = projectile->aliveTime / projectile->totalAliveTime;
 
     if (alivePercentage >= 1.0) {
-        if (projectile->targetMinionId != NULLID) {
-            destroyEntity(MINION_TYPE, projectile->targetMinionId);
+        switch(projectile->type) {
+            case ARROW_PROJECTILE_TYPE:
+                if (projectile->targetMinionId != NULLID) {
+                    destroyEntity(MINION_TYPE, projectile->targetMinionId);
+                }
+                break;
+            case BOMB_PROJECTILE_TYPE:
+                explodeAt(projectile->targetPosition, BOMB_EXPLOSION_RADIUS);
+                break;
+                
         }
         return destroyEntity(PROJECTILE_TYPE, id);
+        
     }
 
     float oldY = projectile->entity.position.y - projectile->entity.height;
@@ -1097,7 +1147,7 @@ TileMap loadTileMap(Image* mapImage) {
 
             if (color.g == 0 && color.b == 0) {
                 // SPAWN TOWER
-                spawnTower(position, color.r * 10);
+                spawnTower(ARCHER_TOWER_TYPE, position, color.r * 10);
                 tileData->type = GROUND_TILE;
             }
 
@@ -1324,7 +1374,7 @@ int main(void) {
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && DEBUG_MODE)
         {
-            spawnTower(mouseWorldPosition, 100);
+            spawnTower(BOMB_TOWER_TYPE, mouseWorldPosition, 100);
         }
 
         // Update Entities
