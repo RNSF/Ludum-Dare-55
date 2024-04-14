@@ -31,6 +31,15 @@
 // C Utils
 //------------------------------------------------------------------------------------
 
+
+//
+
+Vector2 getSquashScale(float t, float scaler) {
+    static float squashMax = 1.1;
+    float squashAmount = 1 - exp( -t * 10);
+    return (Vector2){ Lerp(squashMax * scaler, 1.0, squashAmount), Lerp(1.0 / squashMax / scaler, 1.0, squashAmount) };
+}
+
 // Blend Color
 Color ColorLerp(Color c1, Color c2, float amount) {
     return (Color) {
@@ -45,12 +54,12 @@ Color ColorLerp(Color c1, Color c2, float amount) {
 
 // [0, 1]
 float randFloat() {
-    return GetRandomValue(0, INT_MAX) / INT_MAX;
+    return (float)GetRandomValue(0, INT_MAX) / (float) INT_MAX;
 }
 
 // [min, max]
 float randRange(float min, float max) {
-    Lerp(min, max, randFloat());
+    return Lerp(min, max, randFloat());
 }
 
 // Dynamic Int Array
@@ -105,12 +114,12 @@ void drawSpriteAnchored(Texture2D texture, Vector2 position, float rotation, Vec
     );
 }
 
-void drawSpriteAnchoredScaled(Texture2D texture, Vector2 position, float rotation, float scale, Vector2 anchor, Color tint) {
+void drawSpriteAnchoredScaled(Texture2D texture, Vector2 position, float rotation, Vector2 scale, Vector2 anchor, Color tint) {
     DrawTexturePro(texture, (Rectangle) { 0, 0, texture.width, texture.height },
         (Rectangle) {
-        position.x, position.y, texture.width * scale, texture.height * scale
+        position.x, position.y, texture.width * scale.x, texture.height * scale.y
     },
-        Vector2Multiply(anchor, (Vector2) { texture.width, texture.height }), rotation, tint
+        Vector2Multiply(anchor, (Vector2) { texture.width* scale.x, texture.height * scale.y }), rotation, tint
     );
 }
 
@@ -119,6 +128,7 @@ void drawTextAnchored(Vector2 position, Vector2 anchor, Font font, const char* t
     Vector2 drawPosition = Vector2Subtract(position, Vector2Multiply(textSize, anchor));
     DrawTextEx(font, text, drawPosition, fontSize, spacing, color);
 }
+
 
 
 //------------------------------------------------------------------------------------
@@ -151,6 +161,7 @@ Texture2D TRAP_SHADOW_SPRITE;
 Texture2D TOWER_SHADOW_SPRITE;
 Texture2D DUST_PARTICLE_SPRITE;
 Texture2D BRICK_PARTICLE_SPRITE;
+Texture2D FLASH_PARTICLE_SPRITE;
 
 void loadSprites() {
     PLAYER_MINION_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
@@ -166,6 +177,7 @@ void loadSprites() {
     TOWER_SHADOW_SPRITE = LoadTexture("Images/Entities/TowerShadow.png");
     DUST_PARTICLE_SPRITE = LoadTexture("Images/Entities/DustParticle.png");
     BRICK_PARTICLE_SPRITE = LoadTexture("Images/Entities/BrickParticle.png");
+    FLASH_PARTICLE_SPRITE = LoadTexture("Images/Entities/FlashParticle.png");
 }
 
 void unloadSprites() {
@@ -182,6 +194,7 @@ void unloadSprites() {
     UnloadTexture(TOWER_SHADOW_SPRITE);
     UnloadTexture(DUST_PARTICLE_SPRITE);
     UnloadTexture(BRICK_PARTICLE_SPRITE);
+    UnloadTexture(FLASH_PARTICLE_SPRITE);
 }
 
 
@@ -193,7 +206,7 @@ void unloadSprites() {
 Font MAIN_FONT;
 
 void loadFonts() {
-    MAIN_FONT = LoadFontEx("Fonts/LilitaOne-Regular.ttf", 32, 0, 0);
+    MAIN_FONT = LoadFontEx("Fonts/LilitaOne-Regular.ttf", 128, 0, 0);
 }
 
 void unloadFonts() {
@@ -207,11 +220,17 @@ void unloadFonts() {
 
 #define TILE_SIZE 60
 
-const float MINION_SPEED = 100.0;
+const float PLAYER_MINION_SPEED = 100.0;
+const float ENEMY_MINION_SPEED = 80;
 const float MINION_ACCELERATION = 10.0;
 const Vector2 SCREEN_SIZE = { 900, 18 * 30 };
 const float SPAWN_PERIOD = 0.01;
 
+enum GetMinionMode {
+    PLAYER_ONLY,
+    ENEMY_ONLY,
+    BOTH,
+};
 
 // Colors
 const unsigned int GROUND_COLOR = 0xF1BB87FF;
@@ -220,6 +239,10 @@ const unsigned int PLACEABLE_COLOR = 0x2E86ABFF;
 const unsigned int PLACEABLE_COLOR_2 = 0x207295FF;
 const unsigned int PLAYER_COLOR = 0x2E86ABFF;
 const unsigned int ENEMY_COLOR = 0xA4243BFF;
+const unsigned int BACKGROUND_COLOR = 0x281611FF;
+const unsigned int BACKGROUND_COLOR_2 = 0x241410FF;
+
+
 
 //------------------------------------------------------------------------------------
 // C Structs
@@ -235,9 +258,10 @@ typedef struct Entity {
 typedef struct Minion {
     Entity entity;
     Vector2 velocity;
-    int targetTowerId;
+    int targetId;
     bool isPlayer;
-    bool isTargted;
+    bool isProjectileTargeted;
+    bool isMinionTargeted;
 } Minion;
 
 
@@ -247,6 +271,7 @@ typedef struct Tower {
     int health;
     int value;
     float attackCooldown;
+    float lastHitAt;
 } Tower;
 
 typedef struct Projectile {
@@ -304,6 +329,7 @@ typedef struct TileMap {
 
 typedef struct Level {
     char* imagePath;
+    char* description;
     int startingMinionCount;
 } Level;
 
@@ -354,14 +380,14 @@ Entity* getEntity(int type, int id);
 TileData* getTile(TileMap* tileMap, int x, int y);
 TileMap loadTileMap(Image* mapImage);
 TileData* getTileAt(TileMap* tileMap, Vector2 position);
-void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius);
+void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius, enum GetMinionMode mode);
 int spawnProjectile(int type, Vector2 startPosition, int targetMinionId, float totalAliveTime);
 float calculateProjectileHeight(float timePercent);
 void loadLevel(Level* level);
-void loadNextLevel();
+void gotoNextLevel();
 void reloadLevel();
 void resetClass(int type);
-void loadPreviousLevel();
+void gotoPreviousLevel();
 void quickSortGlobalId(GlobalId arr[], int low, int high);
 int explodeAt(Vector2 position, float radius);
 int spawnParticle(
@@ -574,14 +600,19 @@ void sortGlobalIdArrayByDepth(GlobalIdArray* a) {
 // C Vars
 //------------------------------------------------------------------------------------
 
-#define MINION_ATTACK_RANGE 4;
+#define MINION_ATTACK_RANGE 8
 
 
 bool isMinionTargetRecalculationPending;
 int minionInventoryCount;
+float timeSinceLastInventoryIncrease;
+float timeSinceLastInventoryDecrease;
 TileMap currentTileMap;
 IntArray minionIdsInRange;
 GlobalIdArray allEntities;
+RenderTexture2D worldRenderTexture;
+float LEVEL_TRANSITION_TIME_MAX = 1.0;
+float levelTransitionTime = 0.0;
 
 const int spawnDeltaDis = 10;
 Vector2 lastSpawnPoint;
@@ -601,39 +632,103 @@ Vector2 lastSpawnPoint;
 // C Minions
 //------------------------------------------------------------------------------------
 
+#define ENEMY_MINION_VIEW_RADIUS 150
+
+void minionKickDust(Vector2 position) {
+    spawnParticle(
+        (Vector3) { position.x - 10, position.y, 5 }, 
+        &DUST_PARTICLE_SPRITE,
+        (Vector3) { -20, 0, 0 }, (Vector3) { 0, 0, 100 },
+        1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
+    );
+
+    spawnParticle(
+        (Vector3) { position.x + 10, position.y, 5 }, 
+        &DUST_PARTICLE_SPRITE,
+        (Vector3) { 20, 0, 0 }, (Vector3) { 0, 0, 100 },
+        1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
+    );
+}
 
 void updateMinion(int id, float delta) {
     Minion* minion = getEntity(MINION_TYPE, id);
 
-    if (isMinionTargetRecalculationPending) {
-        minion->targetTowerId = calculateMinionTarget(id);
+    if (minion->isPlayer) {
+        if (isMinionTargetRecalculationPending) {
+            minion->targetId = calculateMinionTarget(id);
+        }
+
+        
+
+        // UPDATE POSITION
+       
+    } else {
+        getMinionIdsInRange(&minionIdsInRange, &currentTileMap, minion->entity.position, MINION_ATTACK_RANGE, PLAYER_ONLY);
+
+        if (minionIdsInRange.used) {
+            minion->targetId = minionIdsInRange.array[0];
+        }
+        else if (minion->targetId == NULLID || !getEntity(MINION_TYPE, minion->targetId)->isSpawned) {
+            minion->targetId = NULLID;
+
+            // Find new minion to attack
+            getMinionIdsInRange(&minionIdsInRange, &currentTileMap, minion->entity.position, ENEMY_MINION_VIEW_RADIUS, PLAYER_ONLY);
+
+            // Filter to only non targted minions
+            int count = minionIdsInRange.used;
+            int j = 0;
+            for ITERATE(i, count) {
+                int i = GetRandomValue(0, minionIdsInRange.used - 1);
+                int id = minionIdsInRange.array[i];
+                Minion* minion = getEntity(MINION_TYPE, id);
+
+                if (!minion->isMinionTargeted) {
+                    minionIdsInRange.array[j++] = minionIdsInRange.array[i];
+                }
+                else {
+                    minionIdsInRange.used--;
+                }
+            }
+
+            if (minionIdsInRange.used > 0) {
+                int i = GetRandomValue(0, minionIdsInRange.used - 1);
+                int id = minionIdsInRange.array[i];
+                Minion* targetMinion = getEntity(MINION_TYPE, id);
+                targetMinion->isMinionTargeted = true;
+                minion->targetId = id;
+            }
+        }
     }
 
-    bool inRange = minion->targetTowerId != NULLID
-        && Vector2Distance(minion->entity.position, getEntity(TOWER_TYPE, minion->targetTowerId)->position) < MINION_ATTACK_RANGE;
+    int opponentType = minion->isPlayer ? TOWER_TYPE : MINION_TYPE;
+    bool inRange = minion->targetId != NULLID
+        && Vector2Distance(minion->entity.position, getEntity(opponentType, minion->targetId)->position) < MINION_ATTACK_RANGE;
     // UPDATE VELOCITY
-    if (minion->targetTowerId != NULLID && !inRange) {
-        Entity* targetEntity = getEntity(TOWER_TYPE, minion->targetTowerId);
+    if (minion->targetId != NULLID && !inRange) {
+        Entity* targetEntity = getEntity(opponentType, minion->targetId);
         Vector2 moveDirection = Vector2Normalize(
             Vector2Subtract(targetEntity->position, minion->entity.position)
         );
 
-        minion->velocity = Vector2Scale(moveDirection, MINION_SPEED);
+        minion->velocity = Vector2Scale(moveDirection, minion->isPlayer ? PLAYER_MINION_SPEED : ENEMY_MINION_SPEED);
     }
     else {
         minion->velocity = Vector2Zero();
     }
 
-    
+
 
     // ATTACK
-    if (minion->targetTowerId != NULLID && inRange) {
-        damageTower(minion->targetTowerId, 1);
+    if (minion->targetId != NULLID && inRange) {
+        if (minion->isPlayer) {
+            damageTower(minion->targetId, 1);
+        } else {
+            destroyEntity(MINION_TYPE, minion->targetId);
+        }
         destroyEntity(MINION_TYPE, id);
         return;
     }
 
-    // UPDATE POSITION
     minion->entity.position = Vector2Add(minion->entity.position, Vector2Scale(minion->velocity, delta));
 }
 
@@ -645,17 +740,22 @@ void drawMinion(int id) {
     //DrawRectangle(p.x - 5, p.y - 5, 10, 10, RED);
     Vector2 p2 = p;
     p2.y -= abs(sin(minion->entity.lifeTime * 10) * 7);
+    Texture2D* sprite = minion->isPlayer ? &PLAYER_MINION_SPRITE : &ENEMY_MINION_SPRITE;
+    Color color = minion->isPlayer ? GetColor(PLAYER_COLOR) : GetColor(ENEMY_COLOR);
 
+    Vector2 scale = Vector2One();
+    if (minion->entity.lifeTime < 5.0) {
+        scale = getSquashScale(minion->entity.lifeTime, 1.2);
+    }
+    drawSpriteAnchoredScaled(*sprite, p2, 0, scale, (Vector2) { 0.5, 1.0 }, color);
     
-    drawSpriteAnchored(PLAYER_MINION_SPRITE, p2, 0, (Vector2) { 0.5, 1.0 }, GetColor(PLAYER_COLOR));
+   
     
 }
 
 
 void onMinionDestroyed(int id) {
-    if (entityClasses[MINION_TYPE].spawnCount == 0 && minionInventoryCount == 0) {
-        reloadLevel();
-    }
+    minionKickDust(getEntity(MINION_TYPE, id)->position);
 }
 
 
@@ -681,7 +781,7 @@ int calculateMinionTarget(int id) {
 }
 
 
-int spawnMinionAt(Vector2 position) {
+int spawnMinionAt(Vector2 position, bool isPlayer) {
     
     int id = createEntity(MINION_TYPE);
     if (id == NULLID) return NULLID;
@@ -690,29 +790,19 @@ int spawnMinionAt(Vector2 position) {
 
     minion->entity.position = position;
     minion->velocity = (Vector2){ 0, 0 };
-    minion->targetTowerId = calculateMinionTarget(id);
-    minion->isPlayer = true;
-    minion->isTargted = false;
+    minion->targetId = isPlayer ? calculateMinionTarget(id) : NULLID;
+    minion->isPlayer = isPlayer;
+    minion->isProjectileTargeted = false;
+    minion->isMinionTargeted = false;
 
-    spawnParticle(
-        (Vector3) { minion->entity.position.x - 10, minion->entity.position.y, 5 }, 
-        &DUST_PARTICLE_SPRITE,
-        (Vector3) { -20, 0, 0 }, (Vector3) { 0, 0, 100 },
-        1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
-    );
-
-    spawnParticle(
-        (Vector3) { minion->entity.position.x + 10, minion->entity.position.y, 5 }, 
-        &DUST_PARTICLE_SPRITE,
-        (Vector3) { 20, 0, 0 }, (Vector3) { 0, 0, 100 },
-        1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
-    );
+    minionKickDust(minion->entity.position);
 
     return id;
 }
 
 
-void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius) {
+
+void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius, enum GetMinionMode mode) {
     int minX = imax((position.x - radius) / TILE_SIZE, 0);
     int maxX = imin((position.x + radius) / TILE_SIZE, tileMap->width - 1);
     int minY = imax((position.y - radius) / TILE_SIZE, 0);
@@ -729,10 +819,12 @@ void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, f
             TileData* tile = getTile(tileMap, x, y);
             for ITERATE(i, tile->minionIds.used) {
                 int id = tile->minionIds.array[i];
-                Entity* entity = getEntity(MINION_TYPE, id);
-                if (!entity->isSpawned) continue;
+                Minion* minion = getEntity(MINION_TYPE, id);
+                if (!minion->entity.isSpawned) continue;
+                if (minion->isPlayer && mode == ENEMY_ONLY)  continue;
+                if (!minion->isPlayer && mode == PLAYER_ONLY)  continue;
 
-                if (Vector2DistanceSqr(entity->position, position) <= radiusSqr) {
+                if (Vector2DistanceSqr(minion->entity.position, position) <= radiusSqr) {
                     insertIntArray(result, id);
                 }
             }
@@ -753,7 +845,7 @@ const float TOWER_ATTACK_RADIUS[] = {
 
 const float TOWER_ATTACK_PERIOD[] = {
     0.4,
-    1.5,
+    1.8,
     0
 };
 
@@ -778,6 +870,7 @@ int spawnTower(int type, Vector2 position, float health) {
     tower->entity.position = position;
     tower->value = health * 2;
     tower->attackCooldown = TOWER_ATTACK_PERIOD[type];
+    tower->lastHitAt = 0.0;
 
     isMinionTargetRecalculationPending = true;
 
@@ -794,7 +887,9 @@ void drawTower(int id) {
         case SUMMONER_TOWER_TYPE: sprite = &SUMMONER_TOWER_SPRITE; break;
     }
     
-    drawSpriteAnchored(*sprite, tower->entity.position, 0, (Vector2) { 0.5, 1.0 }, GetColor(ENEMY_COLOR));
+
+    Vector2 scale = getSquashScale(tower->entity.lifeTime - tower->lastHitAt, 1.0);
+    drawSpriteAnchoredScaled(*sprite, tower->entity.position, 0, scale, (Vector2) { 0.5, 1.0 }, GetColor(ENEMY_COLOR));
     
 
     
@@ -803,7 +898,7 @@ void drawTower(int id) {
     /*DrawText(str, tower->entity.position.x, tower->entity.position.y - ARCHER_TOWER_SPRITE.height / 2, 30, BLACK);*/
 
     Vector2 textPosition = tower->entity.position;
-    textPosition.y -= ARCHER_TOWER_SPRITE.height / 2 - 4;
+    textPosition.y -= (ARCHER_TOWER_SPRITE.height / 2 - 4) * scale.y;
 
     drawTextAnchored(textPosition, (Vector2) { 0.5, 0.5 }, MAIN_FONT, str, 32, 0.0, BLACK);
 }
@@ -811,6 +906,7 @@ void drawTower(int id) {
 void damageTower(int id, int damageAmount) {
     Tower* tower = getEntity(TOWER_TYPE, id);
     tower->health -= damageAmount;
+    tower->lastHitAt = tower->entity.lifeTime;
 }
 
 
@@ -819,6 +915,7 @@ void updateTower(int id, float delta) {
     Tower* tower = getEntity(TOWER_TYPE, id);
     if (tower->health <= 0) {
         minionInventoryCount += tower->value;
+        timeSinceLastInventoryIncrease = GetTime();
         isMinionTargetRecalculationPending = true;
         destroyEntity(TOWER_TYPE, id);
     }
@@ -828,34 +925,37 @@ void updateTower(int id, float delta) {
 
     else {
         
+        if (tower->type == SUMMONER_TOWER_TYPE) {
+        
+        } else {
+            getMinionIdsInRange(&minionIdsInRange, &currentTileMap, tower->entity.position, TOWER_ATTACK_RADIUS[tower->type], PLAYER_ONLY);
 
-        getMinionIdsInRange(&minionIdsInRange, &currentTileMap, tower->entity.position, TOWER_ATTACK_RADIUS[tower->type]);
+            // Filter to only non targted minions
+            int count = minionIdsInRange.used;
+            int j = 0;
+            for ITERATE(i, count) {
+                int i = GetRandomValue(0, minionIdsInRange.used - 1);
+                int id = minionIdsInRange.array[i];
+                Minion* minion = getEntity(MINION_TYPE, id);
 
-        // Filter to only non targted minions
-        int count = minionIdsInRange.used;
-        int j = 0;
-        for ITERATE(i, count) {
-            int i = GetRandomValue(0, minionIdsInRange.used - 1);
-            int id = minionIdsInRange.array[i];
-            Minion* minion = getEntity(MINION_TYPE, id);
-
-            if (!minion->isTargted) {
-                minionIdsInRange.array[j++] = minionIdsInRange.array[i];
-            } else {
-                minionIdsInRange.used--;
+                if (!minion->isProjectileTargeted) {
+                    minionIdsInRange.array[j++] = minionIdsInRange.array[i];
+                } else {
+                    minionIdsInRange.used--;
+                }
             }
-        }
 
-        if (minionIdsInRange.used > 0) {
-            int i = GetRandomValue(0, minionIdsInRange.used - 1);
-            int id = minionIdsInRange.array[i];
-            Minion* minion = getEntity(MINION_TYPE, id);
-            float distanceToMinion = Vector2Distance(tower->entity.position, minion->entity.position);
-            float attackTime = distanceToMinion / TOWER_PROJECTILE_SPEED[tower->type];
-            minion->isTargted = true;
-            int projectileType = tower->type == ARCHER_TOWER_TYPE ? ARROW_PROJECTILE_TYPE : BOMB_PROJECTILE_TYPE;
-            spawnProjectile(projectileType, tower->entity.position, id, max(attackTime, 0.1));
-            tower->attackCooldown += TOWER_ATTACK_PERIOD[tower->type];
+            if (minionIdsInRange.used > 0) {
+                int i = GetRandomValue(0, minionIdsInRange.used - 1);
+                int id = minionIdsInRange.array[i];
+                Minion* minion = getEntity(MINION_TYPE, id);
+                float distanceToMinion = Vector2Distance(tower->entity.position, minion->entity.position);
+                float attackTime = distanceToMinion / TOWER_PROJECTILE_SPEED[tower->type];
+                minion->isProjectileTargeted = true;
+                int projectileType = tower->type == ARCHER_TOWER_TYPE ? ARROW_PROJECTILE_TYPE : BOMB_PROJECTILE_TYPE;
+                spawnProjectile(projectileType, tower->entity.position, id, max(attackTime, 0.1));
+                tower->attackCooldown += TOWER_ATTACK_PERIOD[tower->type];
+            }
         }
     }
 
@@ -894,7 +994,7 @@ void onTowerDestroyed(int id) {
     );*/
 
     if (entityClasses[TOWER_TYPE].spawnCount == 0) {
-        loadNextLevel();
+        gotoNextLevel();
     }
 }
 
@@ -903,7 +1003,7 @@ void onTowerDestroyed(int id) {
 // C Projectile
 //------------------------------------------------------------------------------------
 
-#define BOMB_EXPLOSION_RADIUS 100
+#define BOMB_EXPLOSION_RADIUS 70
 
 int spawnProjectile(int type, Vector2 startPosition, int targetMinionId, float totalAliveTime) {
     assert(getEntity(MINION_TYPE, targetMinionId)->isSpawned);
@@ -1011,7 +1111,7 @@ void updateTrap(int id, float delta) {
     Trap* trap = getEntity(TRAP_TYPE, id);
 
     // Can optimize to check hasMinionInRange
-    getMinionIdsInRange(&minionIdsInRange, &currentTileMap, trap->entity.position, TRAP_RANGE);
+    getMinionIdsInRange(&minionIdsInRange, &currentTileMap, trap->entity.position, TRAP_RANGE, PLAYER_ONLY);
 
     if (minionIdsInRange.used > 0) {
         explodeAt(trap->entity.position, TRAP_EXPLOSION_RADIUS);
@@ -1021,7 +1121,7 @@ void updateTrap(int id, float delta) {
 
 void drawTrap(int id) {
     Trap* trap = getEntity(TRAP_TYPE, id);
-    drawSpriteAnchored(TRAP_SPRITE, trap->entity.position, 0, (Vector2) { 0.5, 1.0 }, GetColor(ENEMY_COLOR));
+    drawSpriteAnchoredScaled(TRAP_SPRITE, trap->entity.position, 0, getSquashScale(trap->entity.lifeTime, 1.2), (Vector2) { 0.5, 0.9 }, GetColor(ENEMY_COLOR));
 }
 
 void onTrapDestroyed(int id) {
@@ -1090,7 +1190,7 @@ void drawParticle(int id) {
     Vector2 drawPosition = particle->entity.position;
     drawPosition.y -= particle->entity.height;
 
-    drawSpriteAnchoredScaled(*particle->sprite, drawPosition, 0, scale, (Vector2) { 0.5, 0.5 }, color);
+    drawSpriteAnchoredScaled(*particle->sprite, drawPosition, 0, (Vector2){ scale , scale }, (Vector2) { 0.5, 0.5 }, color);
 }
 
 void onParticleDestroyed(int id) {
@@ -1102,12 +1202,28 @@ void onParticleDestroyed(int id) {
 //------------------------------------------------------------------------------------
 
 int explodeAt(Vector2 position, float radius) {
-    getMinionIdsInRange(&minionIdsInRange, &currentTileMap, position, radius);
+    getMinionIdsInRange(&minionIdsInRange, &currentTileMap, position, radius, BOTH);
 
     printf("%d\n", minionIdsInRange.used);
     for ITERATE(i, minionIdsInRange.used) {
         int id = minionIdsInRange.array[i];
         destroyEntity(MINION_TYPE, id);
+    }
+
+    spawnParticle(
+        (Vector3) { position.x, position.y + 50, 55 },
+        &FLASH_PARTICLE_SPRITE,
+        (Vector3) { 0, 0, 0 }, (Vector3) { 0, 0, 100 },
+        0.2, 0.0, WHITE, GetColor(0xFFFF0000), radius / FLASH_PARTICLE_SPRITE.width * 2.2, 0.2
+    );
+
+    for ITERATE(i, 40) {
+        spawnParticle(
+            (Vector3) { position.x + randRange(-radius / 2, radius / 2), position.y + randRange(-radius / 2, radius / 2), randRange(0, 10) },
+            &DUST_PARTICLE_SPRITE,
+            (Vector3) { randRange(-50, 50), randRange(-10, 10), randRange(0, 30) }, (Vector3) { 0, 0, 100 },
+            randRange(0.5, 0.8), 1.0, GetColor(ENEMY_COLOR), BLACK, 2.0, 0.2
+        );
     }
 
 }
@@ -1146,8 +1262,14 @@ TileMap loadTileMap(Image* mapImage) {
             };
 
             if (color.g == 0 && color.b == 0) {
-                // SPAWN TOWER
+                // SPAWN ARCHER TOWER
                 spawnTower(ARCHER_TOWER_TYPE, position, color.r * 10);
+                tileData->type = GROUND_TILE;
+            }
+
+            if (color.r == 0 && color.b == 0) {
+                // SPAWN BOMB TOWER
+                spawnTower(BOMB_TOWER_TYPE, position, color.g * 10);
                 tileData->type = GROUND_TILE;
             }
 
@@ -1189,6 +1311,11 @@ void updateTileMap(TileMap* tileMap) {
 }
 
 void drawTileMap(TileMap* tileMap) {
+
+    static int borderAmount = 10;
+
+    DrawRectangle(-borderAmount, -borderAmount, tileMap->width * TILE_SIZE + borderAmount * 2, tileMap->height * TILE_SIZE + borderAmount * 2, BLACK);
+
     for ITERATE(x, tileMap->width) {
         for ITERATE(y, tileMap->height) {
             TileData* tile = getTile(tileMap, x, y);
@@ -1240,33 +1367,74 @@ TileData* getTileAt(TileMap* tileMap, Vector2 position) {
 
 #define LEVEL_COUNT 8
 Level levels[LEVEL_COUNT];
-int currentLevelNumber = -1;
+int currentLevelNumber = 0;
 int pendingLevelNumber = -1;
+float levelStartTime = 0.0;
 
 void initLevels() {
-    levels[0] = (Level){ .imagePath = "Images/Maps/Level0.png", .startingMinionCount = 100 };
-    levels[1] = (Level){ .imagePath = "Images/Maps/Level1.png", .startingMinionCount = 40 };
-    levels[2] = (Level){ .imagePath = "Images/Maps/TrapTest.png", .startingMinionCount = 10000 };
-    levels[3] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
-    levels[4] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
-    levels[5] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
-    levels[6] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
-    levels[7] = (Level){ .imagePath = "Images/Maps/TestLevel.png", .startingMinionCount = 10 };
+    levels[0] = (Level){ 
+        .imagePath = "Images/Maps/Level0.png", 
+        .startingMinionCount = 100, 
+        .description = "Click and Drag on the Blue Region"
+    };
+    levels[1] = (Level){ 
+        .imagePath = "Images/Maps/Level1.png", 
+        .startingMinionCount = 40,
+        .description = "Choose Wisely"
+    };
+    levels[2] = (Level){
+        .imagePath = "Images/Maps/Level2.png",
+        .startingMinionCount = 100,
+        .description = "Watch out!"
+    };
+    levels[3] = (Level){
+        .imagePath = "Images/Maps/Level3.png",
+        .startingMinionCount = 80,
+        .description = "Double Trouble"
+    };
+    levels[4] = (Level){
+        .imagePath = "Images/Maps/TestLevel.png",
+        .startingMinionCount = 1000,
+        .description = "Choose Wisely"
+    };
+    levels[5] = (Level){
+        .imagePath = "Images/Maps/TestLevel.png",
+        .startingMinionCount = 1000,
+        .description = "Choose Wisely"
+    };
+    levels[6] = (Level){
+        .imagePath = "Images/Maps/TestLevel.png",
+        .startingMinionCount = 1000,
+        .description = "Choose Wisely"
+    };
+    levels[7] = (Level){
+        .imagePath = "Images/Maps/TestLevel.png",
+        .startingMinionCount = 1000,
+        .description = "Choose Wisely"
+    };
 }
 
 void reloadLevel() {
+    LEVEL_TRANSITION_TIME_MAX = 1.0;
+    levelTransitionTime = LEVEL_TRANSITION_TIME_MAX;
     pendingLevelNumber = currentLevelNumber;
 }
 
-void loadNextLevel() {
+void gotoNextLevel() {
+    LEVEL_TRANSITION_TIME_MAX = 3.0;
+    levelTransitionTime = LEVEL_TRANSITION_TIME_MAX;
     pendingLevelNumber = max(0, currentLevelNumber + 1);
 }
 
-void loadPreviousLevel() {
+void gotoPreviousLevel() {
+    LEVEL_TRANSITION_TIME_MAX = 1.0;
+    levelTransitionTime = LEVEL_TRANSITION_TIME_MAX;
     pendingLevelNumber = min(currentLevelNumber - 1, LEVEL_COUNT - 1);
 }
 
 void loadLevel(Level* level) {
+
+    levelStartTime = GetTime();
 
     // Reset classes
     for ITERATE(type, TYPE_COUNT) {
@@ -1288,8 +1456,8 @@ void loadLevel(Level* level) {
     // Reset Values
     isMinionTargetRecalculationPending = false;
     minionInventoryCount = level->startingMinionCount;
-
-    
+    timeSinceLastInventoryIncrease = GetTime();
+    timeSinceLastInventoryDecrease = GetTime();
 
     camera.zoom = 0.5;
     setCameraCenter(&camera, (Vector2) {
@@ -1298,7 +1466,6 @@ void loadLevel(Level* level) {
     });
     
 }
-
 
 
 
@@ -1324,11 +1491,12 @@ int main(void) {
 
     initLevels();
     
+    worldRenderTexture = LoadRenderTexture(SCREEN_SIZE.x, SCREEN_SIZE.y);
 
     loadSprites();
     loadFonts();
 
-    loadNextLevel();
+    loadLevel(&levels[currentLevelNumber]);
     // Main game loop
     while (!WindowShouldClose())    // Detect window close button or ESC key
     {
@@ -1337,25 +1505,39 @@ int main(void) {
         // TODO: Update your variables here
         //----------------------------------------------------------------------------------
         
-        if (IsKeyPressed(KEY_R)) {
+        float delta = GetFrameTime();
+
+        if (entityClasses[MINION_TYPE].spawnCount == 0 && minionInventoryCount == 0 && pendingLevelNumber == NULLID) {
             reloadLevel();
         }
+
+        if (IsKeyPressed(KEY_R)) {
+            reloadLevel();
+            levelTransitionTime = 0.0;
+        }
         if (IsKeyPressed(KEY_M)) {
-            loadNextLevel();
+            gotoNextLevel();
+            levelTransitionTime = 0.0;
         }
         if (IsKeyPressed(KEY_N)) {
-            loadPreviousLevel();
+            gotoPreviousLevel();
+            levelTransitionTime = 0.0;
         }
 
+        
         if (pendingLevelNumber != NULLID) {
-            currentLevelNumber = pendingLevelNumber;
-            pendingLevelNumber = NULLID;
-            loadLevel(&levels[currentLevelNumber]);
+            levelTransitionTime -= delta;
+            if (levelTransitionTime <= 0.0)
+            {
+                currentLevelNumber = pendingLevelNumber;
+                pendingLevelNumber = NULLID;
+                loadLevel(&levels[currentLevelNumber]);
+            }
         }
 
         
         
-        float delta = GetFrameTime();
+    
 
         Vector2 mouseWorldPosition = GetScreenToWorld2D(GetMousePosition(), camera);
 
@@ -1369,12 +1551,14 @@ int main(void) {
             Vector2 spawnPoint = mouseWorldPosition;
             lastSpawnPoint = spawnPoint;
             minionInventoryCount--;
-            spawnMinionAt(spawnPoint);
+            timeSinceLastInventoryDecrease = GetTime();
+            spawnMinionAt(spawnPoint, true);
         }
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && DEBUG_MODE)
         {
-            spawnTower(BOMB_TOWER_TYPE, mouseWorldPosition, 100);
+            //spawnTower(BOMB_TOWER_TYPE, mouseWorldPosition, 100);
+            spawnMinionAt(mouseWorldPosition, false);
         }
 
         // Update Entities
@@ -1399,11 +1583,22 @@ int main(void) {
         BeginDrawing();
 
         // Clear
-        ClearBackground(RAYWHITE);
+        ClearBackground(GetColor(BACKGROUND_COLOR));
+
+        static int stripeThickness = 30;
+        static int stripeSpacing = 90;
+
+        int offset = ((int) (GetTime() * 50) % (stripeSpacing));
+        for (int x = -SCREEN_SIZE.y + offset; x <= SCREEN_SIZE.y * 2 + stripeSpacing; x += stripeSpacing) {
+            DrawRectanglePro((Rectangle) { x, SCREEN_SIZE.y / 2, stripeThickness, SCREEN_SIZE.y * 2 }, 
+                (Vector2){stripeThickness / 2, SCREEN_SIZE.y}, 45, GetColor(BACKGROUND_COLOR_2));
+        }
 
         // World
-        BeginMode2D(camera);                         
-                                     
+                          
+        BeginTextureMode(worldRenderTexture);
+        ClearBackground((Color){0, 0, 0, 0});
+        BeginMode2D(camera);       
 
         drawTileMap(&currentTileMap);
 
@@ -1455,11 +1650,34 @@ int main(void) {
         }
 
         EndMode2D(camera);
-        // Gui
+        EndTextureMode();
+        
+        
+        float transitionPercent = 1 - exp((levelStartTime - GetTime()) * 5);
 
+        if (levelTransitionTime > 0.0)
+            transitionPercent = pow(Clamp(2 * (levelTransitionTime - 0.25), 0, 1), 5);
+
+        if (transitionPercent > 0.999) transitionPercent = 1.0;
+        float yOffset = (1 - transitionPercent) * 10;
+        DrawTextureRec(worldRenderTexture.texture, (Rectangle){ 0, yOffset, SCREEN_SIZE.x, -SCREEN_SIZE.y}, Vector2Zero(),
+            ColorLerp(GetColor(0xFFFFFF00), WHITE, transitionPercent));
+        
+
+        
+        // Gui
+        
+
+       
+        drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, 10 }, (Vector2) { 0.5, 0 }, MAIN_FONT, levels[currentLevelNumber].description,  64 * camera.zoom, 0, WHITE);
+        
+
+        float fontScale = getSquashScale(GetTime() - timeSinceLastInventoryIncrease, 1.5).y * getSquashScale(GetTime() - timeSinceLastInventoryDecrease, 1.0).y;
+        
+        
         char str[8];
         sprintf(str, "%d", minionInventoryCount);
-        DrawText(str, 10, 10, 30, BLACK);
+        drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, SCREEN_SIZE.y - 10 }, (Vector2) { 0.5, 1.0 }, MAIN_FONT, str, fontScale * 128 * camera.zoom, 0, WHITE);
 
         //DrawFPS(10, 10);
 
@@ -1474,6 +1692,8 @@ int main(void) {
 
     unloadSprites();
     unloadFonts();
+
+    UnloadRenderTexture(worldRenderTexture);
 
     freeIntArray(&minionIdsInRange);
     freeGlobalIdArray(&allEntities);
