@@ -59,6 +59,17 @@ void freeIntArray(IntArray * a) {
     a->used = a->size = 0;
 }
 
+
+
+// Min Max
+inline int imin(int i1, int i2) {
+    return i1 < i2 ? i1 : i2;
+}
+
+inline int imax(int i1, int i2) {
+    return i1 > i2 ? i1 : i2;
+}
+
 //------------------------------------------------------------------------------------
 // C Consts
 //------------------------------------------------------------------------------------
@@ -69,7 +80,6 @@ const float MINION_SPEED = 50.0;
 const float MINION_ACCELERATION = 5.0;
 const Vector2 SCREEN_SIZE = { 900, 18 * 30 };
 const float SPAWN_PERIOD = 0.01;
-const float PROJECTILE_LIFE_TIME = 0.3;
 
 
 // Colors
@@ -93,8 +103,9 @@ typedef struct Entity {
 typedef struct Minion {
     Entity entity;
     Vector2 velocity;
-    bool isPlayer;
     int targetTowerId;
+    bool isPlayer;
+    bool isTargted;
 } Minion;
 
 
@@ -102,6 +113,7 @@ typedef struct Tower {
     Entity entity;
     int health;
     int value;
+    float attackCooldown;
 } Tower;
 
 typedef struct Projectile {
@@ -110,6 +122,7 @@ typedef struct Projectile {
     Vector2 targetPosition;
     int targetMinionId;
     float aliveTime;
+    float totalAliveTime;
 } Projectile;
 
 typedef struct EntityClass {
@@ -161,7 +174,8 @@ TileData* getTile(TileMap* tileMap, int x, int y);
 TileMap loadTileMap(Image* mapImage);
 TileData* getTileAt(TileMap* tileMap, Vector2 position);
 void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius);
-
+int spawnProjectile(Vector2 startPosition, int targetMinionId, float totalAliveTime);
+float calculateProjectileHeight(float timePercent);
 
 
 //------------------------------------------------------------------------------------
@@ -350,16 +364,18 @@ int spawnMinionAt(Vector2 position) {
     minion->entity.position = position;
     minion->velocity = (Vector2){ 0, 0 };
     minion->targetTowerId = calculateMinionTarget(id);
+    minion->isPlayer = true;
+    minion->isTargted = false;
 
     return id;
 }
 
 
 void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, float radius) {
-    int minX = (position.x - radius) / TILE_SIZE;
-    int maxX = (position.x + radius) / TILE_SIZE;
-    int minY = (position.y - radius) / TILE_SIZE;
-    int maxY = (position.y + radius) / TILE_SIZE;
+    int minX = imax((position.x - radius) / TILE_SIZE, 0);
+    int maxX = imin((position.x + radius) / TILE_SIZE, tileMap->width - 1);
+    int minY = imax((position.y - radius) / TILE_SIZE, 0);
+    int maxY = imin((position.y + radius) / TILE_SIZE, tileMap->height - 1);
 
     float radiusSqr = radius * radius;
 
@@ -388,7 +404,9 @@ void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, f
 // C Towers
 //------------------------------------------------------------------------------------
 
-#define TOWER_ATTACK_RADIUS 40
+#define TOWER_ATTACK_RADIUS 160
+#define TOWER_ATTACK_PERIOD 0.2
+#define TOWER_PROJECTILE_SPEED 80
 
 int spawnTower(Vector2 position, float health) {
     assert(health > 0);
@@ -400,6 +418,7 @@ int spawnTower(Vector2 position, float health) {
     tower->health = health;
     tower->entity.position = position;
     tower->value = health * 2;
+    tower->attackCooldown = TOWER_ATTACK_PERIOD;
 
     isMinionTargetRecalculationPending = true;
 
@@ -430,12 +449,39 @@ void updateTower(int id, float delta) {
         destroyEntity(TOWER_TYPE, id);
     }
 
-    getMinionIdsInRange(&minionIdsInRange, &currentTileMap, tower->entity.position, TOWER_ATTACK_RADIUS);
+    tower->attackCooldown -= delta;
 
-    for ITERATE(i, minionIdsInRange.used) {
-        int id = minionIdsInRange.array[i];
-        destroyEntity(MINION_TYPE, id);
+    if (tower->attackCooldown <= 0) {
+        tower->attackCooldown += TOWER_ATTACK_PERIOD;
+
+        getMinionIdsInRange(&minionIdsInRange, &currentTileMap, tower->entity.position, TOWER_ATTACK_RADIUS);
+
+        // Filter to only non targted minions
+        int count = minionIdsInRange.used;
+        int j = 0;
+        for ITERATE(i, count) {
+            int i = GetRandomValue(0, minionIdsInRange.used - 1);
+            int id = minionIdsInRange.array[i];
+            Minion* minion = getEntity(MINION_TYPE, id);
+
+            if (!minion->isTargted) {
+                minionIdsInRange.array[j++] = minionIdsInRange.array[i];
+            } else {
+                minionIdsInRange.used--;
+            }
+        }
+
+        if (minionIdsInRange.used > 0) {
+            int i = GetRandomValue(0, minionIdsInRange.used - 1);
+            int id = minionIdsInRange.array[i];
+            Minion* minion = getEntity(MINION_TYPE, id);
+            float distanceToMinion = Vector2Distance(tower->entity.position, minion->entity.position);
+            float attackTime = distanceToMinion / TOWER_PROJECTILE_SPEED;
+            minion->isTargted = true;
+            spawnProjectile(tower->entity.position, id, max(attackTime, 0.1));
+        }
     }
+
     
 }
 
@@ -444,10 +490,25 @@ void updateTower(int id, float delta) {
 // C Projectile
 //------------------------------------------------------------------------------------
 
+int spawnProjectile(Vector2 startPosition, int targetMinionId, float totalAliveTime) {
+    assert(getEntity(MINION_TYPE, targetMinionId)->isSpawned);
+
+    int id = createEntity(PROJECTILE_TYPE);
+    Projectile* projectile = getEntity(PROJECTILE_TYPE, id);
+
+    projectile->startPosition = startPosition;
+    projectile->targetMinionId = targetMinionId;
+    projectile->aliveTime = 0.0;
+    projectile->totalAliveTime = totalAliveTime;
+    return id;
+}
+
+
 void drawProjectile(int id) {
-    Projectile* projectile = getEntity(TOWER_TYPE, id);
-    
-    DrawRectangleV(projectile->entity.position, (Vector2){5, 5}, ORANGE);
+    Projectile* projectile = getEntity(PROJECTILE_TYPE, id);
+    Vector2 drawPosition = projectile->entity.position;
+    drawPosition.y -= projectile->entity.height;
+    DrawRectangleV(drawPosition, (Vector2){5, 5}, ORANGE);
 }
 
 
@@ -466,8 +527,10 @@ void updateProjectile(int id, float delta) {
 
     // Update alive time
     projectile->aliveTime += delta;
+    float totalTime = projectile->totalAliveTime;
+    float alivePercentage = projectile->aliveTime / projectile->totalAliveTime;
 
-    if (projectile->aliveTime >= 1.0) {
+    if (alivePercentage >= 1.0) {
         if (projectile->targetMinionId != NULLID) {
             destroyEntity(MINION_TYPE, projectile->targetMinionId);
         }
@@ -475,19 +538,18 @@ void updateProjectile(int id, float delta) {
     }
 
     // Update position / height
-    float alivePercentage = projectile->aliveTime / PROJECTILE_LIFE_TIME;
-
     projectile->entity.position = Vector2Lerp(projectile->startPosition, projectile->targetPosition, alivePercentage);
     projectile->entity.height = calculateProjectileHeight(alivePercentage);
-    
 
 }
 
 float calculateProjectileHeight(float timePercent) {
     static const float startHeight = 10.0;
-    static const float peakHeight = 20.0;
+    static const float peakHeight = 20.0; // this is not actually peak height, but I'm too lazy to make the equation better
 
-    return -peakHeight * (timePercent - 1) * (timePercent + startHeight / peakHeight);
+    float result = -peakHeight * (timePercent - 1) * (timePercent + startHeight / peakHeight); 
+
+    return result;
 }
 
 
