@@ -80,6 +80,12 @@ void drawSpriteAnchored(Texture2D texture, Vector2 position, float rotation, Vec
     );
 }
 
+void drawTextAnchored(Vector2 position, Vector2 anchor, Font font, const char* text, int fontSize, float spacing, Color color) {
+    Vector2 textSize = MeasureTextEx(font, text, fontSize, spacing);
+    Vector2 drawPosition = Vector2Subtract(position, Vector2Multiply(textSize, anchor));
+    DrawTextEx(font, text, drawPosition, fontSize, spacing, color);
+}
+
 
 //------------------------------------------------------------------------------------
 // C Camera
@@ -112,16 +118,16 @@ Texture2D TOWER_SHADOW_SPRITE;
 
 void loadSprites() {
     PLAYER_MINION_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
-    ENEMY_MINION_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
-    ARCHER_TOWER_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
-    BOMB_TOWER_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
-    SUMMONING_TOWER_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
-    TRAP_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
-    ARROW_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
-    BOMB_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    ENEMY_MINION_SPRITE = LoadTexture("Images/Entities/EnemyMinion.png");
+    ARCHER_TOWER_SPRITE = LoadTexture("Images/Entities/Tower0.png");
+    BOMB_TOWER_SPRITE = LoadTexture("Images/Entities/Tower2.png");
+    SUMMONING_TOWER_SPRITE = LoadTexture("Images/Entities/Tower1.png");
+    TRAP_SPRITE = LoadTexture("Images/Entities/Trap.png");
+    ARROW_SPRITE = LoadTexture("Images/Entities/Arrow.png");
+    BOMB_SPRITE = LoadTexture("Images/Entities/Bomb.png");
     MINION_SHADOW_SPRITE = LoadTexture("Images/Entities/MinionShadow.png");
-    TRAP_SHADOW_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
-    TOWER_SHADOW_SPRITE = LoadTexture("Images/Entities/PlayerMinion.png");
+    TRAP_SHADOW_SPRITE = LoadTexture("Images/Entities/TrapShadow.png");
+    TOWER_SHADOW_SPRITE = LoadTexture("Images/Entities/TowerShadow.png");
 }
 
 void unloadSprites() {
@@ -140,13 +146,29 @@ void unloadSprites() {
 
 
 //------------------------------------------------------------------------------------
+// C Fonts
+//------------------------------------------------------------------------------------
+
+
+Font MAIN_FONT;
+
+void loadFonts() {
+    MAIN_FONT = LoadFontEx("Fonts/LilitaOne-Regular.ttf", 32, 0, 0);
+}
+
+void unloadFonts() {
+    UnloadFont(MAIN_FONT);
+}
+
+
+//------------------------------------------------------------------------------------
 // C Consts
 //------------------------------------------------------------------------------------
 
-#define TILE_SIZE 30
+#define TILE_SIZE 60
 
-const float MINION_SPEED = 50.0;
-const float MINION_ACCELERATION = 5.0;
+const float MINION_SPEED = 100.0;
+const float MINION_ACCELERATION = 10.0;
 const Vector2 SCREEN_SIZE = { 900, 18 * 30 };
 const float SPAWN_PERIOD = 0.01;
 
@@ -429,9 +451,11 @@ void drawMinion(int id) {
     Vector2 p = minion->entity.position;
     //DrawRectangle(p.x - 5, p.y - 5, 10, 10, RED);
     Vector2 p2 = p;
-    p2.y -= abs(sin(minion->entity.lifeTime * 10) * 5);
-    drawSpriteAnchored(PLAYER_MINION_SPRITE, p2, 0, (Vector2) { 0.5, 1.0 }, GetColor(PLAYER_COLOR));
+    p2.y -= abs(sin(minion->entity.lifeTime * 10) * 7);
+
     drawSpriteAnchored(MINION_SHADOW_SPRITE, p, 0, (Vector2) { 0.5, 0.5 }, WHITE);
+    drawSpriteAnchored(PLAYER_MINION_SPRITE, p2, 0, (Vector2) { 0.5, 1.0 }, GetColor(PLAYER_COLOR));
+    
 }
 
 
@@ -514,9 +538,9 @@ void getMinionIdsInRange(IntArray* result, TileMap* tileMap, Vector2 position, f
 // C Towers
 //------------------------------------------------------------------------------------
 
-#define TOWER_ATTACK_RADIUS 160
+#define TOWER_ATTACK_RADIUS 320
 #define TOWER_ATTACK_PERIOD 1.0
-#define TOWER_PROJECTILE_SPEED 80
+#define TOWER_PROJECTILE_SPEED 160
 
 int spawnTower(Vector2 position, float health) {
     assert(health > 0);
@@ -537,11 +561,20 @@ int spawnTower(Vector2 position, float health) {
 
 void drawTower(int id) {
     Tower* tower = getEntity(TOWER_TYPE, id);
-    DrawCircleV(tower->entity.position, 10, YELLOW);
+    
+    drawSpriteAnchored(TOWER_SHADOW_SPRITE, tower->entity.position, 0, (Vector2) { 0.5, 0.5 }, WHITE);
+    drawSpriteAnchored(ARCHER_TOWER_SPRITE, tower->entity.position, 0, (Vector2) { 0.5, 1.0 }, GetColor(ENEMY_COLOR));
+    
 
+    
     char str[8];
     sprintf(str, "%d", (int) ceil(tower->health));
-    DrawText(str, tower->entity.position.x, tower->entity.position.y, 12, BLACK);
+    /*DrawText(str, tower->entity.position.x, tower->entity.position.y - ARCHER_TOWER_SPRITE.height / 2, 30, BLACK);*/
+
+    Vector2 textPosition = tower->entity.position;
+    textPosition.y -= ARCHER_TOWER_SPRITE.height / 2 - 4;
+
+    drawTextAnchored(textPosition, (Vector2) { 0.5, 0.5 }, MAIN_FONT, str, 32, 0.0, BLACK);
 }
 
 void damageTower(int id, int damageAmount) {
@@ -842,7 +875,7 @@ void loadLevel(Level* level) {
 
     
 
-    camera.zoom = 1;
+    camera.zoom = 0.5;
     setCameraCenter(&camera, (Vector2) {
         currentTileMap.width * TILE_SIZE / 2,
         currentTileMap.height * TILE_SIZE / 2
@@ -874,6 +907,7 @@ int main(void) {
     
 
     loadSprites();
+    loadFonts();
 
     loadNextLevel();
     // Main game loop
@@ -982,6 +1016,7 @@ int main(void) {
     //--------------------------------------------------------------------------------------
 
     unloadSprites();
+    unloadFonts();
 
     freeIntArray(&minionIdsInRange);
     destroyTileMap(&currentTileMap);
