@@ -757,16 +757,16 @@ Vector2 lastSpawnPoint;
 #define ENEMY_MINION_VIEW_RADIUS_LONG 600
 #define ENEMY_MINION_VIEW_RADIUS_SHORT 300
 
-void particleKickDust(Vector2 position) {
+void particleKickDust(Vector2 position, float height) {
     spawnParticle(
-        (Vector3) { position.x - 10, position.y, 5 }, 
+        (Vector3) { position.x - 10, position.y, height},
         &DUST_PARTICLE_SPRITE,
         (Vector3) { -20, 0, 0 }, (Vector3) { 0, 0, 100 },
         1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
     );
 
     spawnParticle(
-        (Vector3) { position.x + 10, position.y, 5 }, 
+        (Vector3) { position.x + 10, position.y, height },
         &DUST_PARTICLE_SPRITE,
         (Vector3) { 20, 0, 0 }, (Vector3) { 0, 0, 100 },
         1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
@@ -833,7 +833,7 @@ void updateMinion(int id, float delta) {
                 Minion* targetMinion = getEntity(MINION_TYPE, newTargetId);
                 targetMinion->isMinionTargeted = true;
                 minion->targetId = newTargetId;
-                particleKickDust(minion->entity.position);
+                particleKickDust(minion->entity.position, 5);
             }
             
         }
@@ -906,7 +906,18 @@ void onMinionDestroyed(int id) {
     
     Minion* minion = getEntity(MINION_TYPE, id);
     if (!minion->isPlayer) enemyMinionCount--;
-    particleKickDust(minion->entity.position);
+    particleKickDust(minion->entity.position, 5);
+
+   /* for ITERATE(i, 6) {
+        float startSize = randRange(1.2, 1.4);
+        int colorHex = minion->isPlayer ? PLAYER_COLOR : ENEMY_COLOR;
+        spawnParticle(
+            (Vector3) {minion->entity.position.x + randRange(-5, 5), minion->entity.position.y + randRange(-3, 3), randRange(0, 30) },
+            &DUST_PARTICLE_SPRITE,
+            (Vector3) { randRange(-50, 50), randRange(-20, 20), randRange(0, 300) }, (Vector3) { 0, 0, -500 },
+            randRange(1.1, 1.6), 2.0, GetColor(colorHex), GetColor(colorHex & 0xFFFFFF00), startSize, startSize - 0.3
+        );
+    }*/
 }
 
 
@@ -949,7 +960,7 @@ int spawnMinionAt(Vector2 position, bool isPlayer) {
     minion->isMinionTargeted = false;
     minion->entity.height = 0;
 
-    particleKickDust(minion->entity.position);
+    particleKickDust(minion->entity.position, 5);
 
     if (!minion->isPlayer) enemyMinionCount++;
 
@@ -1119,9 +1130,16 @@ void updateTower(int id, float delta) {
                 float attackTime = distanceToMinion / TOWER_PROJECTILE_SPEED[tower->type];
                 minion->isProjectileTargeted = true;
                 int projectileType = tower->type == ARCHER_TOWER_TYPE ? ARROW_PROJECTILE_TYPE : BOMB_PROJECTILE_TYPE;
-                spawnProjectile(projectileType, tower->entity.position, id, max(attackTime, 0.1));
+                
                 tower->attackCooldown += TOWER_ATTACK_PERIOD[tower->type];
                 tower->lastShot = tower->entity.lifeTime;
+
+                int projectileId = spawnProjectile(projectileType, tower->entity.position, id, max(attackTime, 0.1));
+
+                /*if (projectileId != NULLID) {
+                    Projectile* projectile = getEntity(PROJECTILE_TYPE, projectileId);
+                    particleKickDust(projectile->entity.position, projectile->entity.height);
+                }*/
             }
         }
     }
@@ -1132,13 +1150,6 @@ void updateTower(int id, float delta) {
 void onTowerDestroyed(int id) {
     Tower* tower = getEntity(TOWER_TYPE, id);
 
-    /*spawnParticle(
-        (Vector3) { tower->entity.position.x - 10, tower->entity.position.y, 20 },
-        &BRICK_PARTICLE_SPRITE,
-        (Vector3) { -20, 0, 0 }, (Vector3) { 0, 0, 100 },
-        1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
-    );
-
     spawnParticle(
         (Vector3) { tower->entity.position.x - 10, tower->entity.position.y, 20 },
         &BRICK_PARTICLE_SPRITE,
@@ -1146,19 +1157,17 @@ void onTowerDestroyed(int id) {
         1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
     );
 
-    spawnParticle(
-        (Vector3) { tower->entity.position.x - 10, tower->entity.position.y, 20 },
-        &BRICK_PARTICLE_SPRITE,
-        (Vector3) { -20, 0, 0 }, (Vector3) { 0, 0, 100 },
-        1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
-    );
-
-    spawnParticle(
-        (Vector3) { tower->entity.position.x - 10, tower->entity.position.y, 20 },
-        &BRICK_PARTICLE_SPRITE,
-        (Vector3) { -20, 0, 0 }, (Vector3) { 0, 0, 100 },
-        1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
-    );*/
+    
+    for ITERATE(i, 40) {
+        float startSize = randRange(1.0, 2.5);
+        spawnParticle(
+            (Vector3) {tower->entity.position.x + randRange(-35, 35), tower->entity.position.y + randRange(-3, 3), randRange(0, 70) },
+            &DUST_PARTICLE_SPRITE,
+            (Vector3) { randRange(-50, 50), randRange(-20, 20), randRange(0, 300) }, (Vector3) { 0, 0, -500 },
+            randRange(1.1, 1.6), 2.0, GetColor(ENEMY_COLOR), GetColor(ENEMY_COLOR & 0xFFFFFF00), startSize, startSize - 0.6
+        );
+    }
+    
 
     shakeCamera(3.5, 0.3);
 
@@ -1189,6 +1198,8 @@ int spawnProjectile(int type, Vector2 startPosition, int targetMinionId, float t
     assert(targetMinionId < entityClasses[MINION_TYPE].bankSize);
 
     int id = createEntity(PROJECTILE_TYPE);
+    if (id == NULLID) return NULLID;
+
     Projectile* projectile = getEntity(PROJECTILE_TYPE, id);
 
     projectile->startPosition = startPosition;
@@ -1366,6 +1377,7 @@ void updateParticle(int id, float delta) {
     particle->entity.position.x += particle->velocity.x * delta;
     particle->entity.position.y += particle->velocity.y * delta;
     particle->entity.height += particle->velocity.z * delta;
+    particle->entity.height = max(0, particle->entity.height);
 }
 
 void drawParticle(int id) {
