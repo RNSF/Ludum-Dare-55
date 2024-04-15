@@ -1620,7 +1620,7 @@ void initLevels() {
     levels[7] = (Level){
         .imagePath = "Images/Maps/Freeplay.png",
         .startingMinionCount = 1000,
-        .description = "Freeplay (Num Keys to Spawn)",
+        .description = "Freeplay Unlocked! (Num Keys to Spawn)",
         .isDebugLevel = true
     };
 }
@@ -1769,7 +1769,7 @@ int main(void) {
             placeSoundCooldown -= delta;
     
 
-            Vector2 mouseWorldPosition = GetScreenToWorld2D(GetMousePosition(), camera);
+            Vector2 mouseWorldPosition = Vector2Add(GetScreenToWorld2D(GetMousePosition(), camera), Vector2Scale(shakeOffset, 1.0/ camera.zoom));
 
             TileData* tileAtMouse = getTileAt(&currentTileMap, mouseWorldPosition);
 
@@ -1993,11 +1993,13 @@ int main(void) {
             drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, SCREEN_SIZE.y - 70 }, (Vector2) { 0.5, 1.0 }, MAIN_FONT, "Click to Start", 64 * camera.zoom, 0, ColorLerp(WHITE, GetColor(0xFFFFFF00), pow(sin(GetTime() * 2.5), 2)));
         }
         EndDrawing();
-        //----------------------------------------------------------------------------------
+		//----------------------------------------------------------------------------------
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        if (inMenu && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             inMenu = false;
-    }
+            PlaySound(GAIN_MINIONS_SOUND);
+        }
+	}
 
 
 
