@@ -244,6 +244,7 @@ Sound MINION_HURT_SOUND;
 Sound soundInstances[SOUND_INSTANCE_COUNT];
 
 float placeSoundCooldown = 0.0;
+bool isSoundOn = true;
 
 bool playSoundInstance(Sound sound, float volume, float pitch) {
     static lastPlayedSoundInt = 0;
@@ -1150,14 +1151,6 @@ void updateTower(int id, float delta) {
 void onTowerDestroyed(int id) {
     Tower* tower = getEntity(TOWER_TYPE, id);
 
-    spawnParticle(
-        (Vector3) { tower->entity.position.x - 10, tower->entity.position.y, 20 },
-        &BRICK_PARTICLE_SPRITE,
-        (Vector3) { -20, 0, 0 }, (Vector3) { 0, 0, 100 },
-        1.0, 0.5, WHITE, GetColor(0xFFFFFF00), 1.0, 0.2
-    );
-
-    
     for ITERATE(i, 40) {
         float startSize = randRange(1.0, 2.5);
         spawnParticle(
@@ -1765,6 +1758,10 @@ int main(void) {
                 gotoPreviousLevel();
                 levelTransitionTime = 0.0;
             }
+            if (IsKeyPressed(KEY_L)) {
+                isSoundOn = !isSoundOn;
+                SetMasterVolume(isSoundOn ? 1.0 : 0.0);
+            }
 
         
             if (pendingLevelNumber != NULLID) {
@@ -1991,8 +1988,8 @@ int main(void) {
             sprintf(str, "%d", minionInventoryCount);
             drawTextAnchored((Vector2) { SCREEN_SIZE.x / 2, SCREEN_SIZE.y - 10 }, (Vector2) { 0.5, 1.0 }, MAIN_FONT, str, fontScale * 128 * camera.zoom, 0, WHITE);
 
-            char* controlsString = "R to Reset \nM to Skip \nN to Go Back";
-            drawTextAnchored((Vector2) { 10, SCREEN_SIZE.y - 35 }, (Vector2) { 0.0, 1.0 }, MAIN_FONT, controlsString, 32 * camera.zoom, 0, WHITE);
+            char* controlsString = "L to Mute\nR to Reset \nM to Skip \nN to Go Back";
+            drawTextAnchored((Vector2) { 10, SCREEN_SIZE.y - 45 }, (Vector2) { 0.0, 1.0 }, MAIN_FONT, controlsString, 32 * camera.zoom, 0, WHITE);
             //DrawFPS(10, 10);
         } else {
             drawSpriteAnchoredScaled(TITLE_SPRITE, (Vector2) { SCREEN_SIZE.x / 2, 130 + sin(GetTime()) * 10 }, 0, (Vector2){ camera.zoom , camera.zoom
